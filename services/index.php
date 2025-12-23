@@ -1,9 +1,9 @@
 <?php
 // ==================== КОНФИГУРАЦИЯ ====================
 define('APP_ENV', 'development');
-define('EVENT_STORE_FILE', __DIR__ . 'events.dat');
-define('TASK_QUEUE_FILE', __DIR__ . 'tasks.dat');
-define('INTEGRATIONS_CONFIG', __DIR__ . 'integrations.json');
+define('EVENT_STORE_FILE', __DIR__ . '/events.dat');
+define('TASK_QUEUE_FILE', __DIR__ . '/tasks.dat');
+define('INTEGRATIONS_CONFIG', __DIR__ . '/integrations.json');
 
 // ==================== БАЗОВЫЕ ИНТЕРФЕЙСЫ ====================
 interface Event {}
@@ -120,6 +120,11 @@ class FileEventStore
         });
     }
     
+    public function getAllEvents()
+    {
+        return $this->loadEvents();
+    }
+    
     private function loadEvents()
     {
         if (!file_exists($this->eventFile)) {
@@ -142,7 +147,7 @@ class FileEventStore
     private function dispatch(DomainEvent $event)
     {
         $eventHandlers = [
-            LeadCreated::class => ['LeadProjector@onLeadCreated'],
+            LeadCreated::class => [],
             PaymentRegistered::class => ['YandexDirectIntegration@onPaymentRegistered']
         ];
         
@@ -164,6 +169,7 @@ class LeadAggregate
     private $data;
     private $status;
     private $crmId;
+    private $campaignId;
     private $events = [];
     private $version = 0;
     
@@ -172,14 +178,15 @@ class LeadAggregate
         $this->id = $id;
     }
     
-    public static function create($formData)
+    public static function create($formData, $campaignId = null)
     {
         $aggregateId = uniqid('lead_');
         $aggregate = new self($aggregateId);
         
         $event = new LeadCreated($aggregateId, [
             'form_data' => $formData,
-            'initial_status' => 'new'
+            'initial_status' => 'new',
+            'campaign_id' => $campaignId
         ]);
         
         $aggregate->apply($event);
@@ -190,7 +197,7 @@ class LeadAggregate
     {
         $event = new LeadSentToCRM($this->id, [
             'crm_config' => $crmConfig,
-            'status' => 'sending_to_crm'
+            'status' => 'sent_to_crm'
         ]);
         
         $this->apply($event);
@@ -214,6 +221,7 @@ class LeadAggregate
             case LeadCreated::class:
                 $this->data = $event->payload['form_data'];
                 $this->status = 'new';
+                $this->campaignId = $event->payload['campaign_id'] ?? null;
                 break;
             case LeadSentToCRM::class:
                 $this->status = 'sent_to_crm';
@@ -230,6 +238,7 @@ class LeadAggregate
     public function getId() { return $this->id; }
     public function getData() { return $this->data; }
     public function getStatus() { return $this->status; }
+    public function getCampaignId() { return $this->campaignId; }
     public function getEvents() { return $this->events; }
     public function getVersion() { return $this->version; }
 }
@@ -275,17 +284,29 @@ abstract class BaseIntegrationAdapter implements IntegrationAdapter
 
 class YandexDirectIntegration
 {
-    private $oauthToken;
-    private $campaignId;
+    private $config;
     
     public function __construct($config)
     {
-        $this->oauthToken = $config['oauth_token'] ?? '';
-        $this->campaignId = $config['campaign_id'] ?? '';
+        $this->config = $config;
     }
     
-    public function sendConversion($leadId, $conversionType, $value = null)
+    public function sendConversion($campaignId, $leadId, $conversionType, $value = null)
     {
+        // Находим конфигурацию для конкретной кампании
+        $campaignConfig = null;
+        foreach ($this->config['campaigns'] ?? [] as $campaign) {
+            if ($campaign['campaign_id'] === $campaignId) {
+                $campaignConfig = $campaign;
+                break;
+            }
+        }
+        
+        if (!$campaignConfig) {
+            error_log("No Yandex.Direct config found for campaign: $campaignId");
+            return ['status' => 404, 'body' => 'Campaign not found'];
+        }
+        
         $url = "https://api.direct.yandex.ru/live/v4/json/";
         
         $data = [
@@ -293,7 +314,7 @@ class YandexDirectIntegration
             'param' => [
                 'Conversions' => [
                     [
-                        'CampaignID' => $this->campaignId,
+                        'CampaignID' => $campaignId,
                         'Yclid' => $leadId,
                         'ConversionType' => $conversionType,
                         'Value' => $value,
@@ -301,7 +322,7 @@ class YandexDirectIntegration
                     ]
                 ]
             ],
-            'token' => $this->oauthToken
+            'token' => $campaignConfig['oauth_token']
         ];
         
         $httpClient = new HttpClient();
@@ -310,8 +331,29 @@ class YandexDirectIntegration
     
     public function onPaymentRegistered(DomainEvent $event)
     {
+        // Для отправки в Яндекс.Директ нужно знать campaign_id
+        // Он должен быть сохранен в лиде при создании
         $leadId = $event->aggregateId;
-        $this->sendConversion($leadId, 'PAYMENT', $event->payload['payment_data']['amount'] ?? 0);
+        $paymentAmount = $event->payload['payment_data']['amount'] ?? 0;
+        
+        // Получаем campaign_id из событий лида
+        $eventStore = new FileEventStore(EVENT_STORE_FILE);
+        $leadEvents = $eventStore->getEventsByAggregate($leadId);
+        
+        $campaignId = null;
+        foreach ($leadEvents as $leadEvent) {
+            if ($leadEvent['event_type'] === 'LeadCreated' && isset($leadEvent['payload']['campaign_id'])) {
+                $campaignId = $leadEvent['payload']['campaign_id'];
+                break;
+            }
+        }
+        
+        if ($campaignId) {
+            return $this->sendConversion($campaignId, $leadId, 'PAYMENT', $paymentAmount);
+        } else {
+            error_log("No campaign_id found for lead: $leadId");
+            return ['status' => 400, 'body' => 'No campaign_id found'];
+        }
     }
 }
 
@@ -374,6 +416,11 @@ class CrmIntegration extends BaseIntegrationAdapter
             if (isset($leadData[$source])) {
                 $mappedData[$target] = $leadData[$source];
             }
+        }
+        
+        // Добавляем API ключ, если есть
+        if (!empty($this->config['api_key'])) {
+            $mappedData['api_key'] = $this->config['api_key'];
         }
         
         return $this->httpClient->post($url, $mappedData);
@@ -688,14 +735,21 @@ class LeadController extends Controller
             return $this->jsonResponse(['error' => 'form_data is required'], 400);
         }
         
-        $leadAggregate = LeadAggregate::create($data['form_data']);
+        // Получаем campaign_id из данных (должен приходить с лендинга)
+        $campaignId = $data['campaign_id'] ?? $data['utm_campaign'] ?? null;
         
+        // Создаем лид с campaign_id
+        $leadAggregate = LeadAggregate::create($data['form_data'], $campaignId);
+        
+        // Сохраняем события
         foreach ($leadAggregate->getEvents() as $event) {
             $this->eventStore->append($event);
         }
         
-        $crmConfig = $this->getCrmConfigForLanding($data['landing_id'] ?? 'default');
+        // Получаем конфигурацию CRM для этого лендинга/кампании
+        $crmConfig = $this->getCrmConfigForLanding($data['landing_id'] ?? 'default', $campaignId);
         
+        // Ставим задачу на отправку в CRM
         $this->taskQueue->push('send_to_crm', [
             'lead_id' => $leadAggregate->getId(),
             'crm_config' => $crmConfig
@@ -703,6 +757,7 @@ class LeadController extends Controller
         
         return $this->jsonResponse([
             'lead_id' => $leadAggregate->getId(),
+            'campaign_id' => $campaignId,
             'status' => 'created',
             'message' => 'Lead created and queued for CRM'
         ]);
@@ -716,6 +771,7 @@ class LeadController extends Controller
             return $this->jsonResponse(['error' => 'Lead not found'], 404);
         }
         
+        // Восстанавливаем состояние агрегата
         $leadAggregate = new LeadAggregate($leadId);
         foreach ($events as $eventData) {
             $eventClass = $eventData['event_type'];
@@ -729,11 +785,12 @@ class LeadController extends Controller
             'id' => $leadAggregate->getId(),
             'data' => $leadAggregate->getData(),
             'status' => $leadAggregate->getStatus(),
+            'campaign_id' => $leadAggregate->getCampaignId(),
             'events' => $events
         ]);
     }
     
-    private function getCrmConfigForLanding($landingId)
+    private function getCrmConfigForLanding($landingId, $campaignId = null)
     {
         if (!file_exists(INTEGRATIONS_CONFIG)) {
             return ['crm_type' => 'generic', 'api_endpoint' => ''];
@@ -741,26 +798,46 @@ class LeadController extends Controller
         
         $configs = json_decode(file_get_contents(INTEGRATIONS_CONFIG), true);
         
-        foreach ($configs['crm_mappings'] ?? [] as $mapping) {
+        // Сначала ищем по landing_id
+        foreach ($configs['landing_crm_mappings'] ?? [] as $mapping) {
             if ($mapping['landing_id'] === $landingId) {
-                return $mapping['crm_config'];
+                // Находим конфигурацию CRM по crm_id из маппинга
+                foreach ($configs['crm_configs'] ?? [] as $crmConfig) {
+                    if ($crmConfig['crm_id'] === $mapping['crm_id']) {
+                        return $crmConfig;
+                    }
+                }
             }
         }
         
+        // Если есть campaign_id, ищем по нему
+        if ($campaignId) {
+            foreach ($configs['campaign_crm_mappings'] ?? [] as $mapping) {
+                if ($mapping['campaign_id'] === $campaignId) {
+                    foreach ($configs['crm_configs'] ?? [] as $crmConfig) {
+                        if ($crmConfig['crm_id'] === $mapping['crm_id']) {
+                            return $crmConfig;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Конфигурация по умолчанию
         return $configs['default_crm'] ?? ['crm_type' => 'generic', 'api_endpoint' => ''];
     }
 }
 
 class WebhookController extends Controller
 {
-    public function crmWebhook($crmType, $clientId)
+    public function crmWebhook($crmId)
     {
         $data = $this->getRequestData();
         
-        $config = $this->getCrmConfig($crmType, $clientId);
+        $config = $this->getCrmConfig($crmId);
         
         if (!$config) {
-            return $this->jsonResponse(['error' => 'Configuration not found'], 404);
+            return $this->jsonResponse(['error' => 'CRM configuration not found'], 404);
         }
         
         try {
@@ -780,7 +857,7 @@ class WebhookController extends Controller
         }
     }
     
-    private function getCrmConfig($crmType, $clientId)
+    private function getCrmConfig($crmId)
     {
         if (!file_exists(INTEGRATIONS_CONFIG)) {
             return null;
@@ -789,7 +866,7 @@ class WebhookController extends Controller
         $configs = json_decode(file_get_contents(INTEGRATIONS_CONFIG), true);
         
         foreach ($configs['crm_configs'] ?? [] as $config) {
-            if ($config['crm_type'] === $crmType && $config['client_id'] === $clientId) {
+            if ($config['crm_id'] === $crmId) {
                 return $config;
             }
         }
@@ -805,11 +882,7 @@ class AdminController extends Controller
         $eventStore = new FileEventStore(EVENT_STORE_FILE);
         $taskQueue = new FileTaskQueue(TASK_QUEUE_FILE);
         
-        $events = [];
-        if (file_exists(EVENT_STORE_FILE)) {
-            $events = json_decode(file_get_contents(EVENT_STORE_FILE), true) ?? [];
-        }
-        
+        $events = $eventStore->getAllEvents();
         $tasks = [];
         if (file_exists(TASK_QUEUE_FILE)) {
             $tasks = json_decode(file_get_contents(TASK_QUEUE_FILE), true) ?? [];
@@ -820,10 +893,50 @@ class AdminController extends Controller
         echo "<p>Total Events: " . count($events) . "</p>";
         echo "<p>Total Tasks: " . count($tasks) . "</p>";
         
+        // Статистика по кампаниям
+        $campaignStats = [];
+        foreach ($events as $event) {
+            if ($event['event_type'] === 'LeadCreated' && isset($event['payload']['campaign_id'])) {
+                $campaignId = $event['payload']['campaign_id'];
+                if (!isset($campaignStats[$campaignId])) {
+                    $campaignStats[$campaignId] = ['leads' => 0, 'payments' => 0];
+                }
+                $campaignStats[$campaignId]['leads']++;
+            }
+            if ($event['event_type'] === 'PaymentRegistered') {
+                // Находим campaign_id для этого лида
+                $leadEvents = $eventStore->getEventsByAggregate($event['aggregate_id']);
+                foreach ($leadEvents as $leadEvent) {
+                    if ($leadEvent['event_type'] === 'LeadCreated' && isset($leadEvent['payload']['campaign_id'])) {
+                        $campaignId = $leadEvent['payload']['campaign_id'];
+                        if (!isset($campaignStats[$campaignId])) {
+                            $campaignStats[$campaignId] = ['leads' => 0, 'payments' => 0];
+                        }
+                        $campaignStats[$campaignId]['payments']++;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        echo "<h2>Campaign Statistics</h2>";
+        echo "<table border='1' cellpadding='5'>";
+        echo "<tr><th>Campaign ID</th><th>Leads</th><th>Payments</th><th>Conversion</th></tr>";
+        foreach ($campaignStats as $campaignId => $stats) {
+            $conversion = $stats['leads'] > 0 ? round(($stats['payments'] / $stats['leads']) * 100, 2) . '%' : '0%';
+            echo "<tr>";
+            echo "<td>{$campaignId}</td>";
+            echo "<td>{$stats['leads']}</td>";
+            echo "<td>{$stats['payments']}</td>";
+            echo "<td>{$conversion}</td>";
+            echo "</tr>";
+        }
+        echo "</table>";
+        
         echo "<h2>Recent Events</h2>";
         echo "<ul>";
         foreach (array_slice($events, -10) as $event) {
-            echo "<li>{$event['event_type']} - {$event['timestamp']}</li>";
+            echo "<li>{$event['event_type']} - {$event['timestamp']} (Lead: {$event['aggregate_id']})</li>";
         }
         echo "</ul>";
         
@@ -856,8 +969,8 @@ class Router
         
         foreach ($this->routes as $route) {
             if ($route['method'] === $requestMethod && 
-                $this->matchPath($route['path'], $requestPath)) {
-                return $this->executeHandler($route['handler'], $requestPath);
+                $this->matchPath($route['path'], $requestPath, $params)) {
+                return $this->executeHandler($route['handler'], $params);
             }
         }
         
@@ -865,22 +978,33 @@ class Router
         echo json_encode(['error' => 'Route not found']);
     }
     
-    private function matchPath($pattern, $path)
+    private function matchPath($pattern, $path, &$params = [])
     {
-        $pattern = preg_replace('/\{([^}]+)\}/', '([^/]+)', $pattern);
-        return preg_match("#^{$pattern}$#", $path);
+        $pattern = preg_replace('/\{([^}]+)\}/', '(?P<$1>[^/]+)', $pattern);
+        $pattern = "#^{$pattern}$#";
+        
+        if (preg_match($pattern, $path, $matches)) {
+            $params = [];
+            foreach ($matches as $key => $value) {
+                if (is_string($key)) {
+                    $params[$key] = $value;
+                }
+            }
+            return true;
+        }
+        return false;
     }
     
-    private function executeHandler($handler, $path)
+    private function executeHandler($handler, $params = [])
     {
         if (is_callable($handler)) {
-            return $handler();
+            return call_user_func_array($handler, array_values($params));
         }
         
         if (is_string($handler)) {
             list($controller, $method) = explode('@', $handler);
             $controllerInstance = new $controller();
-            return $controllerInstance->$method();
+            return call_user_func_array([$controllerInstance, $method], array_values($params));
         }
     }
 }
@@ -893,17 +1017,14 @@ $router->add('POST', '/api/v1/leads', function() {
     return $controller->create();
 });
 
-$router->add('GET', '/api/v1/leads/{id}', function() {
-    $leadId = $_GET['id'] ?? '';
+$router->add('GET', '/api/v1/leads/{leadId}', function($leadId) {
     $controller = new LeadController();
     return $controller->get($leadId);
 });
 
-$router->add('POST', '/api/v1/webhooks/crm/{crmType}/{clientId}', function() {
-    $crmType = $_GET['crmType'] ?? '';
-    $clientId = $_GET['clientId'] ?? '';
+$router->add('POST', '/api/v1/webhooks/crm/{crmId}', function($crmId) {
     $controller = new WebhookController();
-    return $controller->crmWebhook($crmType, $clientId);
+    return $controller->crmWebhook($crmId);
 });
 
 $router->add('GET', '/admin', function() {
@@ -917,7 +1038,7 @@ $router->add('GET', '/', function() {
     echo "<ul>";
     echo "<li>POST /api/v1/leads - Create lead</li>";
     echo "<li>GET /api/v1/leads/{id} - Get lead</li>";
-    echo "<li>POST /api/v1/webhooks/crm/{type}/{clientId} - CRM webhook</li>";
+    echo "<li>POST /api/v1/webhooks/crm/{crmId} - CRM webhook</li>";
     echo "<li>GET /admin - Admin dashboard</li>";
     echo "</ul>";
 });
