@@ -280,8 +280,9 @@
         // Основная функция приложения
         function app() {
             return {
-                // Базовый URL backend API (замените на ваш реальный адрес при необходимости)
-                apiBaseUrl: 'http://localhost/api',
+                // Базовый URL backend API (используем тот же origin, папка /api/index.php)
+                // При необходимости можно переопределить на другой хост/порт.
+                apiBaseUrl: window.location.origin + '/api/',
                 // Текущее состояние приложения
                 currentPage: 'dashboard',
                 sidebarActive: false,

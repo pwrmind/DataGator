@@ -23,7 +23,11 @@ class Config {
     const USE_DATABASE = false; // Для демо используем массив, в реальном приложении - БД
     
     // Настройки API
-    const API_PREFIX = '/api';
+    // Так как фронт-контроллер расположен в файле /api/index.php,
+    // префикс должен соответствовать этому пути, чтобы Router корректно
+    // извлекал ресурс (connections, mappings и т.д.) из URL вида
+    // /api/index.php/connections, /api/index.php/stats/dashboard и т.п.
+    const API_PREFIX = '/api/index.php';
     const DEFAULT_TIMEZONE = 'Europe/Moscow';
     
     // Настройки безопасности
