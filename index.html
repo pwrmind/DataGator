@@ -1,0 +1,2067 @@
+<!DOCTYPE html>
+<html lang="ru" x-data="app()">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Агрегатор данных из CRM</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.0/dist/cdn.min.js"></script>
+    
+    <style>
+        :root {
+            --primary-color: #4361ee;
+            --secondary-color: #3a0ca3;
+            --success-color: #4cc9f0;
+            --danger-color: #f72585;
+            --warning-color: #f8961e;
+            --light-bg: #f8f9fa;
+            --dark-bg: #212529;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f5f7fb;
+            color: #333;
+            padding-top: 56px;
+        }
+        
+        .monospace {
+            font-family: 'Roboto Mono', monospace;
+        }
+        
+        .navbar-brand {
+            font-weight: 700;
+            color: var(--primary-color) !important;
+        }
+        
+        .sidebar {
+            height: calc(100vh - 56px);
+            position: fixed;
+            top: 56px;
+            left: 0;
+            width: 250px;
+            background: white;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.05);
+            z-index: 100;
+            overflow-y: auto;
+        }
+        
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+            min-height: calc(100vh - 56px);
+        }
+        
+        @media (max-width: 992px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+            }
+            
+            .sidebar.active {
+                transform: translateX(0);
+            }
+            
+            .main-content {
+                margin-left: 0;
+            }
+        }
+        
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+        }
+        
+        .stat-card {
+            border-left: 4px solid var(--primary-color);
+        }
+        
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--secondary-color);
+            border-color: var(--secondary-color);
+        }
+        
+        .badge {
+            font-weight: 500;
+        }
+        
+        .table th {
+            font-weight: 600;
+            border-top: none;
+        }
+        
+        .connection-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-active {
+            background-color: #28a745;
+        }
+        
+        .status-inactive {
+            background-color: #dc3545;
+        }
+        
+        .status-pending {
+            background-color: #ffc107;
+        }
+        
+        .log-entry {
+            border-left: 3px solid #dee2e6;
+            padding-left: 15px;
+            margin-bottom: 10px;
+        }
+        
+        .log-success {
+            border-left-color: #28a745;
+        }
+        
+        .log-error {
+            border-left-color: #dc3545;
+        }
+        
+        .log-warning {
+            border-left-color: #ffc107;
+        }
+        
+        .page-transition {
+            animation: fadeIn 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Навигационная панель -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-white fixed-top shadow-sm">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-database me-2"></i>Агрегатор CRM
+            </a>
+            
+            <button class="navbar-toggler" type="button" @click="toggleSidebar">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="d-lg-none">
+                <div class="dropdown">
+                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                        <i class="fas fa-user"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="#" @click="changePage('dashboard')"><i class="fas fa-tachometer-alt me-2"></i>Дашборд</a></li>
+                        <li><a class="dropdown-item" href="#" @click="changePage('connections')"><i class="fas fa-plug me-2"></i>Подключения</a></li>
+                        <li><a class="dropdown-item" href="#" @click="changePage('mappings')"><i class="fas fa-exchange-alt me-2"></i>Сопоставления</a></li>
+                        <li><a class="dropdown-item" href="#" @click="changePage('monitoring')"><i class="fas fa-chart-line me-2"></i>Мониторинг</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="#" @click="changePage('settings')"><i class="fas fa-cog me-2"></i>Настройки</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Основной контейнер -->
+    <div class="container-fluid">
+        <!-- Боковая панель -->
+        <div class="sidebar" :class="{ 'active': sidebarActive }" id="sidebar">
+            <div class="p-3">
+                <div class="mb-4">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="me-3">
+                            <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px;">
+                                <i class="fas fa-user"></i>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="fw-bold" x-text="currentUser.name"></div>
+                            <small class="text-muted" x-text="currentUser.role"></small>
+                        </div>
+                    </div>
+                </div>
+                
+                <ul class="nav flex-column">
+                    <li class="nav-item mb-2">
+                        <a class="nav-link d-flex align-items-center" href="#" :class="{ 'active': currentPage === 'dashboard' }" @click="changePage('dashboard')">
+                            <i class="fas fa-tachometer-alt me-3"></i> Дашборд
+                        </a>
+                    </li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link d-flex align-items-center" href="#" :class="{ 'active': currentPage === 'connections' }" @click="changePage('connections')">
+                            <i class="fas fa-plug me-3"></i> Подключения CRM
+                            <span class="badge bg-primary rounded-pill ms-auto" x-text="connections.filter(c => c.status === 'active').length"></span>
+                        </a>
+                    </li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link d-flex align-items-center" href="#" :class="{ 'active': currentPage === 'mappings' }" @click="changePage('mappings')">
+                            <i class="fas fa-exchange-alt me-3"></i> Сопоставления
+                            <span class="badge bg-info rounded-pill ms-auto" x-text="mappings.length"></span>
+                        </a>
+                    </li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link d-flex align-items-center" href="#" :class="{ 'active': currentPage === 'monitoring' }" @click="changePage('monitoring')">
+                            <i class="fas fa-chart-line me-3"></i> Мониторинг
+                            <span class="badge bg-warning text-dark rounded-pill ms-auto" x-text="recentErrors.length"></span>
+                        </a>
+                    </li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link d-flex align-items-center" href="#" :class="{ 'active': currentPage === 'logs' }" @click="changePage('logs')">
+                            <i class="fas fa-history me-3"></i> Логи операций
+                        </a>
+                    </li>
+                    <li class="nav-item mt-4">
+                        <a class="nav-link d-flex align-items-center" href="#" :class="{ 'active': currentPage === 'settings' }" @click="changePage('settings')">
+                            <i class="fas fa-cog me-3"></i> Настройки
+                        </a>
+                    </li>
+                </ul>
+                
+                <div class="mt-5 p-3 bg-light rounded">
+                    <small class="text-muted d-block mb-2">Статистика за сегодня</small>
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <div class="fw-bold" x-text="todaysStats.leads"></div>
+                            <small class="text-muted">Лиды</small>
+                        </div>
+                        <div>
+                            <div class="fw-bold" x-text="todaysStats.conversions"></div>
+                            <small class="text-muted">Конверсии</small>
+                        </div>
+                        <div>
+                            <div class="fw-bold" x-text="todaysStats.errors"></div>
+                            <small class="text-muted">Ошибки</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Основное содержимое -->
+        <div class="main-content" id="mainContent">
+            <!-- Динамическое содержимое будет загружаться здесь -->
+            <div x-html="currentPageContent" class="page-transition"></div>
+        </div>
+    </div>
+
+    <!-- Модальные окна будут добавляться здесь -->
+    <div id="modalsContainer"></div>
+
+    <!-- JavaScript приложения -->
+    <script>
+        // Основная функция приложения
+        function app() {
+            return {
+                // Текущее состояние приложения
+                currentPage: 'dashboard',
+                sidebarActive: false,
+                
+                // Текущий пользователь
+                currentUser: {
+                    name: 'Администратор Агентства',
+                    role: 'Администратор',
+                    email: 'admin@agency.ru'
+                },
+                
+                // Данные подключений к CRM
+                connections: [
+                    {
+                        id: 1,
+                        name: 'Битрикс24 - ООО "Ромашка"',
+                        type: 'bitrix24',
+                        url: 'https://romashka.bitrix24.ru',
+                        apiKey: '••••••••',
+                        clientName: 'ООО "Ромашка"',
+                        status: 'active',
+                        lastSync: new Date().toLocaleDateString('ru-RU') + ' 14:30',
+                        leadsToday: 24,
+                        conversionsToday: 8
+                    },
+                    {
+                        id: 2,
+                        name: 'AmoCRM - ИП Сидоров',
+                        type: 'amocrm',
+                        url: 'https://sidorov.amocrm.ru',
+                        apiKey: '••••••••',
+                        clientName: 'ИП Сидоров А.В.',
+                        status: 'active',
+                        lastSync: new Date().toLocaleDateString('ru-RU') + ' 12:45',
+                        leadsToday: 15,
+                        conversionsToday: 5
+                    },
+                    {
+                        id: 3,
+                        name: 'RetailCRM - Магазин "ТехноМир"',
+                        type: 'retailcrm',
+                        url: 'https://technomir.retailcrm.ru',
+                        apiKey: '••••••••',
+                        clientName: 'Магазин "ТехноМир"',
+                        status: 'inactive',
+                        lastSync: new Date(Date.now() - 86400000).toLocaleDateString('ru-RU') + ' 09:20',
+                        leadsToday: 0,
+                        conversionsToday: 0
+                    }
+                ],
+                
+                // Шаблоны сопоставления данных
+                mappings: [
+                    {
+                        id: 1,
+                        name: 'Стандартное для Битрикс24',
+                        sourceSystem: 'landing',
+                        targetSystem: 'bitrix24',
+                        fields: [
+                            { source: 'name', target: 'NAME', transformation: 'none' },
+                            { source: 'phone', target: 'PHONE', transformation: 'phone_ru' },
+                            { source: 'email', target: 'EMAIL', transformation: 'none' },
+                            { source: 'yclid', target: 'UTM_SOURCE', transformation: 'add_yclid_prefix' }
+                        ]
+                    },
+                    {
+                        id: 2,
+                        name: 'Для AmoCRM с доп. полями',
+                        sourceSystem: 'landing',
+                        targetSystem: 'amocrm',
+                        fields: [
+                            { source: 'name', target: 'Имя', transformation: 'none' },
+                            { source: 'phone', target: 'Телефон', transformation: 'phone_ru' },
+                            { source: 'product', target: 'Товар', transformation: 'uppercase' }
+                        ]
+                    }
+                ],
+                
+                // Логи операций
+                logs: [
+                    {
+                        id: 1,
+                        timestamp: new Date().toLocaleDateString('ru-RU') + ' 14:30:22',
+                        type: 'success',
+                        message: 'Отправлен лид #2451 в CRM Битрикс24',
+                        details: 'Клиент: ООО "Ромашка", Телефон: +7 999 123-45-67'
+                    },
+                    {
+                        id: 2,
+                        timestamp: new Date().toLocaleDateString('ru-RU') + ' 14:28:10',
+                        type: 'success',
+                        message: 'Конверсия #201 отправлена в Яндекс.Директ',
+                        details: 'ID сделки: 2451, Сумма: 15000 руб.'
+                    },
+                    {
+                        id: 3,
+                        timestamp: new Date().toLocaleDateString('ru-RU') + ' 14:25:05',
+                        type: 'error',
+                        message: 'Ошибка подключения к RetailCRM',
+                        details: 'Неверный API ключ или истек срок действия'
+                    }
+                ],
+                
+                // Статистика за сегодня
+                todaysStats: {
+                    leads: 42,
+                    conversions: 15,
+                    errors: 3,
+                    activeConnections: 2
+                },
+                
+                // Ошибки за последние 24 часа
+                recentErrors: [
+                    { id: 1, time: '2 часа назад', message: 'Ошибка подключения к RetailCRM' },
+                    { id: 2, time: '5 часов назад', message: 'Таймаут при отправке в Яндекс.Директ' }
+                ],
+                
+                // Данные для мониторинга
+                systemHealth: {
+                    overall: 'healthy',
+                    activeStreams: 3,
+                    totalStreams: 5,
+                    avgResponseTime: 245,
+                    processedToday: 127
+                },
+                
+                // Статистика передачи данных
+                transferStats: {
+                    landingToCRM: {
+                        success: 42,
+                        errors: 3,
+                        pending: 2,
+                        total: 47,
+                        successRate: 89
+                    },
+                    crmToYandex: {
+                        success: 15,
+                        errors: 1,
+                        pending: 0,
+                        total: 16,
+                        successRate: 94
+                    }
+                },
+                
+                // Настройки системы
+                settings: {
+                    systemName: 'Агрегатор данных из CRM',
+                    syncInterval: 30,
+                    logRetentionDays: 30,
+                    notifications: {
+                        errors: true,
+                        syncComplete: true,
+                        dailyReport: false
+                    },
+                    yandexApiKey: '••••••••',
+                    webhookUrl: 'https://api.aggregator.ru/webhook/landing',
+                    version: '1.0.0'
+                },
+                
+                // Фильтры
+                connectionFilterStatus: 'all',
+                connectionFilterType: 'all',
+                connectionSearchQuery: '',
+                logFilterType: 'all',
+                logFilterDateFrom: '',
+                logFilterDateTo: '',
+                logSearchQuery: '',
+                
+                // Инициализация приложения
+                init() {
+                    console.log('Приложение "Агрегатор данных из CRM" инициализировано');
+                    this.loadInitialData();
+                    
+                    setTimeout(() => {
+                        this.showNotification('Добро пожаловать в Агрегатор данных из CRM!', 'success');
+                    }, 1000);
+                },
+                
+                loadInitialData() {
+                    console.log('Загрузка начальных данных...');
+                },
+                
+                // Навигация
+                changePage(page) {
+                    this.currentPage = page;
+                    this.sidebarActive = false;
+                    window.scrollTo(0, 0);
+                },
+                
+                toggleSidebar() {
+                    this.sidebarActive = !this.sidebarActive;
+                },
+                
+                // Геттер для текущего контента страницы
+                get currentPageContent() {
+                    switch(this.currentPage) {
+                        case 'dashboard': return this.dashboardPage();
+                        case 'connections': return this.connectionsPage();
+                        case 'mappings': return this.mappingsPage();
+                        case 'monitoring': return this.monitoringPage();
+                        case 'logs': return this.logsPage();
+                        case 'settings': return this.settingsPage();
+                        default: return this.dashboardPage();
+                    }
+                },
+                
+                // Страница дашборда
+                dashboardPage() {
+                    return `
+                        <div class="page-transition">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h1 class="h3 mb-0"><i class="fas fa-tachometer-alt me-2"></i> Дашборд</h1>
+                                <div>
+                                    <span class="badge bg-light text-dark me-2">Обновлено: ${new Date().toLocaleTimeString()}</span>
+                                    <button class="btn btn-outline-primary btn-sm" @click="refreshDashboard">
+                                        <i class="fas fa-sync-alt"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Статистические карточки -->
+                            <div class="row mb-4">
+                                <div class="col-md-3 mb-3">
+                                    <div class="card stat-card h-100">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <h6 class="text-muted mb-1">Всего лидов сегодня</h6>
+                                                    <h3 class="mb-0" x-text="todaysStats.leads">42</h3>
+                                                </div>
+                                                <div class="bg-primary bg-opacity-10 p-3 rounded">
+                                                    <i class="fas fa-user-plus text-primary fa-2x"></i>
+                                                </div>
+                                            </div>
+                                            <div class="mt-3">
+                                                <small class="text-success"><i class="fas fa-arrow-up me-1"></i> +12% с прошлого дня</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-3 mb-3">
+                                    <div class="card stat-card h-100">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <h6 class="text-muted mb-1">Конверсии сегодня</h6>
+                                                    <h3 class="mb-0" x-text="todaysStats.conversions">15</h3>
+                                                </div>
+                                                <div class="bg-success bg-opacity-10 p-3 rounded">
+                                                    <i class="fas fa-chart-line text-success fa-2x"></i>
+                                                </div>
+                                            </div>
+                                            <div class="mt-3">
+                                                <small class="text-success"><i class="fas fa-arrow-up me-1"></i> +8% с прошлого дня</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-3 mb-3">
+                                    <div class="card stat-card h-100">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <h6 class="text-muted mb-1">Активные подключения</h6>
+                                                    <h3 class="mb-0" x-text="todaysStats.activeConnections">2</h3>
+                                                </div>
+                                                <div class="bg-info bg-opacity-10 p-3 rounded">
+                                                    <i class="fas fa-plug text-info fa-2x"></i>
+                                                </div>
+                                            </div>
+                                            <div class="mt-3">
+                                                <small class="text-muted">из ${this.connections.length} всего</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-3 mb-3">
+                                    <div class="card stat-card h-100">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <h6 class="text-muted mb-1">Ошибки сегодня</h6>
+                                                    <h3 class="mb-0" x-text="todaysStats.errors">3</h3>
+                                                </div>
+                                                <div class="bg-danger bg-opacity-10 p-3 rounded">
+                                                    <i class="fas fa-exclamation-triangle text-danger fa-2x"></i>
+                                                </div>
+                                            </div>
+                                            <div class="mt-3">
+                                                <small class="text-danger"><i class="fas fa-arrow-down me-1"></i> -2 с прошлого дня</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Активные подключения -->
+                            <div class="row">
+                                <div class="col-lg-8 mb-4">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                            <h5 class="mb-0"><i class="fas fa-plug me-2"></i> Активные подключения CRM</h5>
+                                            <a href="#" @click="changePage('connections')" class="btn btn-sm btn-outline-primary">Все подключения</a>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="table-responsive">
+                                                <table class="table table-hover">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Клиент</th>
+                                                            <th>Тип CRM</th>
+                                                            <th>Статус</th>
+                                                            <th>Лиды сегодня</th>
+                                                            <th>Конверсии</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        ${this.connections.filter(c => c.status === 'active').map(conn => `
+                                                            <tr style="cursor: pointer;" @click="viewConnection(${conn.id})">
+                                                                <td>
+                                                                    <div class="d-flex align-items-center">
+                                                                        <div class="connection-status status-${conn.status}"></div>
+                                                                        <strong>${conn.clientName}</strong>
+                                                                    </div>
+                                                                </td>
+                                                                <td>
+                                                                    <span class="badge bg-secondary">${this.getCRMTypeName(conn.type)}</span>
+                                                                </td>
+                                                                <td>
+                                                                    <span class="badge bg-success">Активно</span>
+                                                                </td>
+                                                                <td>${conn.leadsToday}</td>
+                                                                <td>${conn.conversionsToday}</td>
+                                                            </tr>
+                                                        `).join('')}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Последние операции -->
+                                <div class="col-lg-4 mb-4">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-white">
+                                            <h5 class="mb-0"><i class="fas fa-history me-2"></i> Последние операции</h5>
+                                        </div>
+                                        <div class="card-body p-0">
+                                            <div class="list-group list-group-flush">
+                                                ${this.logs.slice(0, 5).map(log => `
+                                                    <div class="list-group-item border-0">
+                                                        <div class="d-flex align-items-start">
+                                                            <div class="me-3">
+                                                                <i class="fas fa-${log.type === 'success' ? 'check-circle text-success' : 'exclamation-triangle text-danger'} mt-1"></i>
+                                                            </div>
+                                                            <div class="flex-grow-1">
+                                                                <div class="mb-1">${log.message}</div>
+                                                                <small class="text-muted">${log.timestamp}</small>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                `).join('')}
+                                            </div>
+                                        </div>
+                                        <div class="card-footer bg-white text-center">
+                                            <a href="#" @click="changePage('logs')" class="text-decoration-none">Показать все логи</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Быстрые действия -->
+                            <div class="row mt-4">
+                                <div class="col-12">
+                                    <div class="card">
+                                        <div class="card-header bg-white">
+                                            <h5 class="mb-0"><i class="fas fa-bolt me-2"></i> Быстрые действия</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row">
+                                                <div class="col-md-3 mb-3">
+                                                    <button class="btn btn-outline-primary w-100 py-3" @click="openModal('newConnection')">
+                                                        <i class="fas fa-plus-circle fa-2x mb-2"></i><br>
+                                                        Новое подключение
+                                                    </button>
+                                                </div>
+                                                <div class="col-md-3 mb-3">
+                                                    <button class="btn btn-outline-success w-100 py-3" @click="openModal('newMapping')">
+                                                        <i class="fas fa-exchange-alt fa-2x mb-2"></i><br>
+                                                        Новое сопоставление
+                                                    </button>
+                                                </div>
+                                                <div class="col-md-3 mb-3">
+                                                    <button class="btn btn-outline-info w-100 py-3" @click="testAllConnections">
+                                                        <i class="fas fa-play-circle fa-2x mb-2"></i><br>
+                                                        Тест всех подключений
+                                                    </button>
+                                                </div>
+                                                <div class="col-md-3 mb-3">
+                                                    <button class="btn btn-outline-warning w-100 py-3" @click="syncAllData">
+                                                        <i class="fas fa-sync-alt fa-2x mb-2"></i><br>
+                                                        Синхронизировать все
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                // Страница подключений
+                connectionsPage() {
+                    return `
+                        <div class="page-transition">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h1 class="h3 mb-0"><i class="fas fa-plug me-2"></i> Управление подключениями CRM</h1>
+                                <button class="btn btn-primary" @click="openModal('newConnection')">
+                                    <i class="fas fa-plus me-2"></i> Новое подключение
+                                </button>
+                            </div>
+                            
+                            <!-- Фильтры и поиск -->
+                            <div class="card mb-4">
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-4 mb-3">
+                                            <label class="form-label">Статус подключения</label>
+                                            <select class="form-select" x-model="connectionFilterStatus">
+                                                <option value="all">Все статусы</option>
+                                                <option value="active">Активные</option>
+                                                <option value="inactive">Неактивные</option>
+                                                <option value="error">С ошибками</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4 mb-3">
+                                            <label class="form-label">Тип CRM</label>
+                                            <select class="form-select" x-model="connectionFilterType">
+                                                <option value="all">Все типы</option>
+                                                <option value="bitrix24">Битрикс24</option>
+                                                <option value="amocrm">AmoCRM</option>
+                                                <option value="retailcrm">RetailCRM</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4 mb-3">
+                                            <label class="form-label">Поиск по названию</label>
+                                            <input type="text" class="form-control" placeholder="Введите название..." x-model="connectionSearchQuery">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Таблица подключений -->
+                            <div class="card">
+                                <div class="card-body p-0">
+                                    <div class="table-responsive">
+                                        <table class="table table-hover mb-0">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th style="width: 40px;"></th>
+                                                    <th>Название</th>
+                                                    <th>Клиент</th>
+                                                    <th>Тип CRM</th>
+                                                    <th>Статус</th>
+                                                    <th>Последняя синхронизация</th>
+                                                    <th>Действия</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${this.getFilteredConnections().map(conn => `
+                                                    <tr>
+                                                        <td>
+                                                            <div class="connection-status status-${conn.status}"></div>
+                                                        </td>
+                                                        <td>
+                                                            <div class="fw-bold">${conn.name}</div>
+                                                            <small class="text-muted">${conn.url}</small>
+                                                        </td>
+                                                        <td>${conn.clientName}</td>
+                                                        <td>
+                                                            <span class="badge bg-secondary">${this.getCRMTypeName(conn.type)}</span>
+                                                        </td>
+                                                        <td>
+                                                            ${conn.status === 'active' 
+                                                                ? '<span class="badge bg-success">Активно</span>' 
+                                                                : '<span class="badge bg-danger">Неактивно</span>'}
+                                                        </td>
+                                                        <td>
+                                                            <div>${conn.lastSync}</div>
+                                                            <small class="text-muted">Лидов сегодня: ${conn.leadsToday}</small>
+                                                        </td>
+                                                        <td>
+                                                            <div class="btn-group btn-group-sm">
+                                                                <button class="btn btn-outline-primary" @click="testConnection(${conn.id})" title="Тест подключения">
+                                                                    <i class="fas fa-play"></i>
+                                                                </button>
+                                                                <button class="btn btn-outline-success" @click="syncConnection(${conn.id})" title="Синхронизировать">
+                                                                    <i class="fas fa-sync-alt"></i>
+                                                                </button>
+                                                                <button class="btn btn-outline-info" @click="editConnection(${conn.id})" title="Редактировать">
+                                                                    <i class="fas fa-edit"></i>
+                                                                </button>
+                                                                <button class="btn btn-outline-danger" @click="deleteConnection(${conn.id})" title="Удалить">
+                                                                    <i class="fas fa-trash"></i>
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                `).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="card-footer bg-white">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            Показано <strong>${this.getFilteredConnections().length}</strong> из <strong>${this.connections.length}</strong> подключений
+                                        </div>
+                                        <div>
+                                            <button class="btn btn-outline-secondary btn-sm me-2" @click="exportConnections">
+                                                <i class="fas fa-download me-1"></i> Экспорт
+                                            </button>
+                                            <button class="btn btn-outline-primary btn-sm" @click="testAllConnections">
+                                                <i class="fas fa-play-circle me-1"></i> Тест всех подключений
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Инструкция -->
+                            <div class="card mt-4">
+                                <div class="card-header bg-light">
+                                    <h6 class="mb-0"><i class="fas fa-info-circle me-2"></i> Информация о подключениях</h6>
+                                </div>
+                                <div class="card-body">
+                                    <p>Для подключения к CRM системы необходимо:</p>
+                                    <ol>
+                                        <li>Получить API ключ в настройках CRM клиента</li>
+                                        <li>Указать URL адрес CRM системы</li>
+                                        <li>Настроить права доступа для чтения сделок и записи лидов</li>
+                                        <li>Протестировать подключение перед использованием</li>
+                                    </ol>
+                                    <div class="alert alert-info mb-0">
+                                        <i class="fas fa-lightbulb me-2"></i> <strong>Совет:</strong> Регулярно проверяйте статус подключений и обновляйте API ключи при их смене.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                // Страница сопоставлений
+                mappingsPage() {
+                    return `
+                        <div class="page-transition">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h1 class="h3 mb-0"><i class="fas fa-exchange-alt me-2"></i> Сопоставление и трансформация данных</h1>
+                                <button class="btn btn-primary" @click="openModal('newMapping')">
+                                    <i class="fas fa-plus me-2"></i> Новое сопоставление
+                                </button>
+                            </div>
+                            
+                            <div class="row">
+                                <!-- Список шаблонов -->
+                                <div class="col-lg-8 mb-4">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-white">
+                                            <h5 class="mb-0">Шаблоны сопоставления</h5>
+                                        </div>
+                                        <div class="card-body p-0">
+                                            ${this.mappings.length === 0 
+                                                ? `
+                                                <div class="text-center py-5">
+                                                    <i class="fas fa-exchange-alt fa-4x text-muted mb-3"></i>
+                                                    <h5>Нет шаблонов сопоставления</h5>
+                                                    <p class="text-muted">Создайте свой первый шаблон для преобразования данных</p>
+                                                    <button class="btn btn-primary" @click="openModal('newMapping')">
+                                                        <i class="fas fa-plus me-2"></i> Создать шаблон
+                                                    </button>
+                                                </div>
+                                                `
+                                                : `
+                                                <div class="list-group list-group-flush">
+                                                    ${this.mappings.map(mapping => `
+                                                        <div class="list-group-item">
+                                                            <div class="d-flex justify-content-between align-items-start">
+                                                                <div class="flex-grow-1">
+                                                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                                                        <h6 class="mb-0">${mapping.name}</h6>
+                                                                        <span class="badge bg-info">${mapping.fields.length} полей</span>
+                                                                    </div>
+                                                                    
+                                                                    <div class="row">
+                                                                        <div class="col-md-6 mb-2">
+                                                                            <small class="text-muted d-block">Источник</small>
+                                                                            <span class="badge bg-secondary">${this.getSystemName(mapping.sourceSystem)}</span>
+                                                                        </div>
+                                                                        <div class="col-md-6 mb-2">
+                                                                            <small class="text-muted d-block">Назначение</small>
+                                                                            <span class="badge bg-primary">${this.getSystemName(mapping.targetSystem)}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    
+                                                                    <div class="mt-2">
+                                                                        ${mapping.fields.slice(0, 3).map(field => `
+                                                                            <span class="badge bg-light text-dark me-1 mb-1">
+                                                                                ${field.source} → ${field.target}
+                                                                            </span>
+                                                                        `).join('')}
+                                                                        ${mapping.fields.length > 3 
+                                                                            ? `<span class="badge bg-light text-dark">+${mapping.fields.length - 3} еще</span>` 
+                                                                            : ''}
+                                                                    </div>
+                                                                </div>
+                                                                <div class="ms-3">
+                                                                    <div class="btn-group btn-group-sm">
+                                                                        <button class="btn btn-outline-primary" @click="editMapping(${mapping.id})">
+                                                                            <i class="fas fa-edit"></i>
+                                                                        </button>
+                                                                        <button class="btn btn-outline-success" @click="testMapping(${mapping.id})">
+                                                                            <i class="fas fa-play"></i>
+                                                                        </button>
+                                                                        <button class="btn btn-outline-danger" @click="deleteMapping(${mapping.id})">
+                                                                            <i class="fas fa-trash"></i>
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    `).join('')}
+                                                </div>
+                                                `}
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Информация о трансформациях -->
+                                <div class="col-lg-4 mb-4">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-white">
+                                            <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i> Доступные трансформации</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <h6>Преобразования данных:</h6>
+                                                <div class="list-group list-group-flush">
+                                                    <div class="list-group-item border-0 px-0 py-2">
+                                                        <div class="d-flex align-items-center">
+                                                            <span class="badge bg-primary me-2">phone_ru</span>
+                                                            <small>Форматирование телефонного номера в российский формат</small>
+                                                        </div>
+                                                    </div>
+                                                    <div class="list-group-item border-0 px-0 py-2">
+                                                        <div class="d-flex align-items-center">
+                                                            <span class="badge bg-primary me-2">uppercase</span>
+                                                            <small>Преобразование текста в верхний регистр</small>
+                                                        </div>
+                                                    </div>
+                                                    <div class="list-group-item border-0 px-0 py-2">
+                                                        <div class="d-flex align-items-center">
+                                                            <span class="badge bg-primary me-2">lowercase</span>
+                                                            <small>Преобразование текста в нижний регистр</small>
+                                                        </div>
+                                                    </div>
+                                                    <div class="list-group-item border-0 px-0 py-2">
+                                                        <div class="d-flex align-items-center">
+                                                            <span class="badge bg-primary me-2">date_iso</span>
+                                                            <small>Конвертация даты в ISO формат</small>
+                                                        </div>
+                                                    </div>
+                                                    <div class="list-group-item border-0 px-0 py-2">
+                                                        <div class="d-flex align-items-center">
+                                                            <span class="badge bg-primary me-2">add_yclid_prefix</span>
+                                                            <small>Добавление префикса yclid к значению</small>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="alert alert-light">
+                                                <i class="fas fa-lightbulb me-2"></i> 
+                                                <strong>Совет:</strong> Создавайте разные шаблоны для разных клиентов и типов данных для повышения точности преобразования.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                // Страница мониторинга
+                monitoringPage() {
+                    return `
+                        <div class="page-transition">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h1 class="h3 mb-0"><i class="fas fa-chart-line me-2"></i> Мониторинг системы</h1>
+                                <div>
+                                    <button class="btn btn-outline-secondary me-2" @click="refreshMonitoring">
+                                        <i class="fas fa-sync-alt"></i>
+                                    </button>
+                                    <button class="btn btn-primary" @click="generateReport">
+                                        <i class="fas fa-file-export me-2"></i> Экспорт отчета
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Статус системы -->
+                            <div class="row mb-4">
+                                <div class="col-md-3 mb-3">
+                                    <div class="card">
+                                        <div class="card-body text-center">
+                                            <div class="mb-3">
+                                                <i class="fas fa-server fa-3x ${this.systemHealth.overall === 'healthy' ? 'text-success' : 'text-danger'}"></i>
+                                            </div>
+                                            <h5>Статус системы</h5>
+                                            <div class="mb-2">
+                                                <span class="badge ${this.systemHealth.overall === 'healthy' ? 'bg-success' : 'bg-danger'}">
+                                                    ${this.systemHealth.overall === 'healthy' ? 'Работает нормально' : 'Есть проблемы'}
+                                                </span>
+                                            </div>
+                                            <small class="text-muted">Обновлено: ${new Date().toLocaleTimeString()}</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-3 mb-3">
+                                    <div class="card">
+                                        <div class="card-body text-center">
+                                            <div class="mb-3">
+                                                <i class="fas fa-exchange-alt fa-3x text-primary"></i>
+                                            </div>
+                                            <h5>Активные потоки</h5>
+                                            <h2 class="mb-2">${this.systemHealth.activeStreams}</h2>
+                                            <small class="text-muted">из ${this.systemHealth.totalStreams} всего</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-3 mb-3">
+                                    <div class="card">
+                                        <div class="card-body text-center">
+                                            <div class="mb-3">
+                                                <i class="fas fa-clock fa-3x text-warning"></i>
+                                            </div>
+                                            <h5>Среднее время ответа</h5>
+                                            <h2 class="mb-2">${this.systemHealth.avgResponseTime}мс</h2>
+                                            <small class="text-muted">Цель: < 500мс</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-3 mb-3">
+                                    <div class="card">
+                                        <div class="card-body text-center">
+                                            <div class="mb-3">
+                                                <i class="fas fa-database fa-3x text-info"></i>
+                                            </div>
+                                            <h5>Обработано сегодня</h5>
+                                            <h2 class="mb-2">${this.systemHealth.processedToday}</h2>
+                                            <small class="text-muted">записей</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Графики и диаграммы -->
+                            <div class="row mb-4">
+                                <div class="col-lg-8 mb-4">
+                                    <div class="card">
+                                        <div class="card-header bg-white">
+                                            <h5 class="mb-0"><i class="fas fa-chart-bar me-2"></i> Активность за последние 24 часа</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="text-center py-4">
+                                                <i class="fas fa-chart-area fa-3x text-muted mb-3"></i>
+                                                <p class="text-muted">В реальном приложении здесь был бы график активности</p>
+                                                <button class="btn btn-outline-primary" @click="simulateActivity">
+                                                    <i class="fas fa-play me-2"></i> Сгенерировать тестовые данные
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-lg-4 mb-4">
+                                    <div class="card">
+                                        <div class="card-header bg-white">
+                                            <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i> Критические ошибки</h5>
+                                        </div>
+                                        <div class="card-body p-0">
+                                            ${this.recentErrors.length === 0 
+                                                ? `
+                                                <div class="text-center py-4">
+                                                    <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                                                    <p class="text-success mb-0">Критических ошибок нет</p>
+                                                </div>
+                                                `
+                                                : `
+                                                <div class="list-group list-group-flush">
+                                                    ${this.recentErrors.map(error => `
+                                                        <div class="list-group-item border-0">
+                                                            <div class="d-flex align-items-start">
+                                                                <div class="me-3 text-danger">
+                                                                    <i class="fas fa-exclamation-circle"></i>
+                                                                </div>
+                                                                <div class="flex-grow-1">
+                                                                    <div class="mb-1">${error.message}</div>
+                                                                    <small class="text-muted">${error.time}</small>
+                                                                </div>
+                                                                <div>
+                                                                    <button class="btn btn-sm btn-outline-danger" @click="resolveError(${error.id})">
+                                                                        Исправить
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    `).join('')}
+                                                </div>
+                                                `}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Статистика по типам данных -->
+                            <div class="card">
+                                <div class="card-header bg-white">
+                                    <h5 class="mb-0"><i class="fas fa-table me-2"></i> Статистика передачи данных</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="table-responsive">
+                                        <table class="table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Направление</th>
+                                                    <th>Успешно</th>
+                                                    <th>С ошибками</th>
+                                                    <th>В процессе</th>
+                                                    <th>Всего</th>
+                                                    <th>Успешность</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr>
+                                                    <td>Лендинг → CRM</td>
+                                                    <td>${this.transferStats.landingToCRM.success}</td>
+                                                    <td>${this.transferStats.landingToCRM.errors}</td>
+                                                    <td>${this.transferStats.landingToCRM.pending}</td>
+                                                    <td>${this.transferStats.landingToCRM.total}</td>
+                                                    <td>
+                                                        <div class="progress" style="height: 10px;">
+                                                            <div class="progress-bar bg-success" 
+                                                                style="width: ${this.transferStats.landingToCRM.successRate}%"></div>
+                                                        </div>
+                                                        <small>${this.transferStats.landingToCRM.successRate}%</small>
+                                                    </td>
+                                                </tr>
+                                                <tr>
+                                                    <td>CRM → Яндекс.Директ</td>
+                                                    <td>${this.transferStats.crmToYandex.success}</td>
+                                                    <td>${this.transferStats.crmToYandex.errors}</td>
+                                                    <td>${this.transferStats.crmToYandex.pending}</td>
+                                                    <td>${this.transferStats.crmToYandex.total}</td>
+                                                    <td>
+                                                        <div class="progress" style="height: 10px;">
+                                                            <div class="progress-bar bg-success" 
+                                                                style="width: ${this.transferStats.crmToYandex.successRate}%"></div>
+                                                        </div>
+                                                        <small>${this.transferStats.crmToYandex.successRate}%</small>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                // Страница логов
+                logsPage() {
+                    return `
+                        <div class="page-transition">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h1 class="h3 mb-0"><i class="fas fa-history me-2"></i> Логи операций</h1>
+                                <div>
+                                    <button class="btn btn-outline-secondary me-2" @click="clearLogs">
+                                        <i class="fas fa-trash me-2"></i> Очистить логи
+                                    </button>
+                                    <button class="btn btn-primary" @click="exportLogs">
+                                        <i class="fas fa-download me-2"></i> Экспорт логов
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Фильтры логов -->
+                            <div class="card mb-4">
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-3 mb-3">
+                                            <label class="form-label">Тип события</label>
+                                            <select class="form-select" x-model="logFilterType">
+                                                <option value="all">Все типы</option>
+                                                <option value="success">Успешные</option>
+                                                <option value="error">Ошибки</option>
+                                                <option value="warning">Предупреждения</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3 mb-3">
+                                            <label class="form-label">Дата с</label>
+                                            <input type="date" class="form-control" x-model="logFilterDateFrom">
+                                        </div>
+                                        <div class="col-md-3 mb-3">
+                                            <label class="form-label">Дата по</label>
+                                            <input type="date" class="form-control" x-model="logFilterDateTo">
+                                        </div>
+                                        <div class="col-md-3 mb-3">
+                                            <label class="form-label">Поиск</label>
+                                            <div class="input-group">
+                                                <input type="text" class="form-control" placeholder="Поиск в логах..." x-model="logSearchQuery">
+                                                <button class="btn btn-outline-secondary" type="button" @click="filterLogs">
+                                                    <i class="fas fa-search"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Таблица логов -->
+                            <div class="card">
+                                <div class="card-body p-0">
+                                    ${this.logs.length === 0 
+                                        ? `
+                                        <div class="text-center py-5">
+                                            <i class="fas fa-history fa-3x text-muted mb-3"></i>
+                                            <h5>Логи операций отсутствуют</h5>
+                                            <p class="text-muted">Здесь будут отображаться все операции системы</p>
+                                        </div>
+                                        `
+                                        : `
+                                        <div class="table-responsive">
+                                            <table class="table table-hover mb-0">
+                                                <thead class="table-light">
+                                                    <tr>
+                                                        <th>Время</th>
+                                                        <th>Тип</th>
+                                                        <th>Событие</th>
+                                                        <th>Детали</th>
+                                                        <th>Действия</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    ${this.getFilteredLogs().map(log => `
+                                                        <tr class="${log.type === 'error' ? 'table-danger' : log.type === 'warning' ? 'table-warning' : ''}">
+                                                            <td nowrap>
+                                                                <div class="small">${log.timestamp}</div>
+                                                            </td>
+                                                            <td>
+                                                                ${log.type === 'success' 
+                                                                    ? '<span class="badge bg-success">Успех</span>' 
+                                                                    : log.type === 'error' 
+                                                                    ? '<span class="badge bg-danger">Ошибка</span>' 
+                                                                    : '<span class="badge bg-warning">Предупреждение</span>'}
+                                                            </td>
+                                                            <td>${log.message}</td>
+                                                            <td>
+                                                                <small class="text-muted">${log.details || 'Нет деталей'}</small>
+                                                            </td>
+                                                            <td>
+                                                                <button class="btn btn-sm btn-outline-primary" @click="viewLogDetails(${log.id})">
+                                                                    <i class="fas fa-eye"></i>
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    `).join('')}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        `}
+                                </div>
+                                ${this.logs.length > 0 ? `
+                                <div class="card-footer bg-white">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            Показано <strong>${this.getFilteredLogs().length}</strong> из <strong>${this.logs.length}</strong> записей
+                                        </div>
+                                        <div>
+                                            <button class="btn btn-sm btn-outline-secondary" @click="loadMoreLogs">
+                                                <i class="fas fa-arrow-down me-1"></i> Загрузить еще
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                // Страница настроек
+                settingsPage() {
+                    return `
+                        <div class="page-transition">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h1 class="h3 mb-0"><i class="fas fa-cog me-2"></i> Настройки системы</h1>
+                                <button class="btn btn-primary" @click="saveSettings">
+                                    <i class="fas fa-save me-2"></i> Сохранить настройки
+                                </button>
+                            </div>
+                            
+                            <!-- Настройки системы -->
+                            <div class="row">
+                                <div class="col-lg-8">
+                                    <!-- Основные настройки -->
+                                    <div class="card mb-4">
+                                        <div class="card-header bg-white">
+                                            <h5 class="mb-0"><i class="fas fa-sliders-h me-2"></i> Основные настройки</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <label class="form-label">Название системы</label>
+                                                <input type="text" class="form-control" x-model="settings.systemName" 
+                                                    placeholder="Агрегатор данных из CRM">
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label class="form-label">Интервал синхронизации (минут)</label>
+                                                <input type="number" class="form-control" x-model="settings.syncInterval" min="5" max="1440">
+                                                <small class="text-muted">Как часто система будет проверять новые данные в CRM</small>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label class="form-label">Время хранения логов (дни)</label>
+                                                <input type="number" class="form-control" x-model="settings.logRetentionDays" min="1" max="365">
+                                                <small class="text-muted">Логи старше указанного количества дней будут автоматически удаляться</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Настройки уведомлений -->
+                                    <div class="card mb-4">
+                                        <div class="card-header bg-white">
+                                            <h5 class="mb-0"><i class="fas fa-bell me-2"></i> Настройки уведомлений</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" x-model="settings.notifications.errors">
+                                                    <label class="form-check-label">Уведомления об ошибках</label>
+                                                </div>
+                                                <small class="text-muted">Получать уведомления при возникновении ошибок в системе</small>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" x-model="settings.notifications.syncComplete">
+                                                    <label class="form-check-label">Уведомления о завершении синхронизации</label>
+                                                </div>
+                                                <small class="text-muted">Получать уведомления при успешном завершении синхронизации</small>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" x-model="settings.notifications.dailyReport">
+                                                    <label class="form-check-label">Ежедневный отчет</label>
+                                                </div>
+                                                <small class="text-muted">Получать ежедневный отчет о работе системы</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-lg-4">
+                                    <!-- Интеграции -->
+                                    <div class="card mb-4">
+                                        <div class="card-header bg-white">
+                                            <h5 class="mb-0"><i class="fas fa-puzzle-piece me-2"></i> Интеграции</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <label class="form-label">Яндекс.Директ API ключ</label>
+                                                <div class="input-group">
+                                                    <input type="password" class="form-control" x-model="settings.yandexApiKey" 
+                                                        placeholder="Введите API ключ">
+                                                    <button class="btn btn-outline-secondary" type="button" 
+                                                            onclick="this.parentElement.querySelector('input').type = 
+                                                                    this.parentElement.querySelector('input').type === 'password' ? 'text' : 'password'">
+                                                        <i class="fas fa-eye"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label class="form-label">Webhook URL для лендингов</label>
+                                                <div class="input-group">
+                                                    <input type="text" class="form-control" readonly 
+                                                        :value="settings.webhookUrl">
+                                                    <button class="btn btn-outline-secondary" type="button" @click="copyWebhookUrl">
+                                                        <i class="fas fa-copy"></i>
+                                                    </button>
+                                                </div>
+                                                <small class="text-muted">Используйте этот URL для отправки данных с лендингов</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Информация о системе -->
+                                    <div class="card">
+                                        <div class="card-header bg-white">
+                                            <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i> О системе</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <div class="d-flex justify-content-between mb-1">
+                                                    <span>Версия системы</span>
+                                                    <span class="fw-bold">${this.settings.version}</span>
+                                                </div>
+                                                
+                                                <div class="d-flex justify-content-between mb-1">
+                                                    <span>Всего подключений</span>
+                                                    <span class="fw-bold">${this.connections.length}</span>
+                                                </div>
+                                                
+                                                <div class="d-flex justify-content-between mb-1">
+                                                    <span>Шаблонов сопоставления</span>
+                                                    <span class="fw-bold">${this.mappings.length}</span>
+                                                </div>
+                                                
+                                                <div class="d-flex justify-content-between">
+                                                    <span>Записей в логах</span>
+                                                    <span class="fw-bold">${this.logs.length}</span>
+                                                </div>
+                                            </div>
+                                            
+                                            <hr>
+                                            
+                                            <div class="text-center">
+                                                <button class="btn btn-outline-danger w-100" @click="resetSystem">
+                                                    <i class="fas fa-redo me-2"></i> Сбросить систему к настройкам по умолчанию
+                                                </button>
+                                                <small class="text-muted d-block mt-2">Это действие нельзя отменить</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                // Вспомогательные функции
+                getCRMTypeName(type) {
+                    const types = {
+                        'bitrix24': 'Битрикс24',
+                        'amocrm': 'AmoCRM',
+                        'retailcrm': 'RetailCRM'
+                    };
+                    return types[type] || type;
+                },
+                
+                getSystemName(system) {
+                    const systems = {
+                        'landing': 'Лендинг',
+                        'bitrix24': 'Битрикс24',
+                        'amocrm': 'AmoCRM',
+                        'yandex_direct': 'Яндекс.Директ'
+                    };
+                    return systems[system] || system;
+                },
+                
+                getFilteredConnections() {
+                    let filtered = this.connections;
+                    
+                    if (this.connectionFilterStatus && this.connectionFilterStatus !== 'all') {
+                        filtered = filtered.filter(c => c.status === this.connectionFilterStatus);
+                    }
+                    
+                    if (this.connectionFilterType && this.connectionFilterType !== 'all') {
+                        filtered = filtered.filter(c => c.type === this.connectionFilterType);
+                    }
+                    
+                    if (this.connectionSearchQuery) {
+                        const query = this.connectionSearchQuery.toLowerCase();
+                        filtered = filtered.filter(c => 
+                            c.name.toLowerCase().includes(query) || 
+                            c.clientName.toLowerCase().includes(query)
+                        );
+                    }
+                    
+                    return filtered;
+                },
+                
+                getFilteredLogs() {
+                    let filtered = this.logs;
+                    
+                    if (this.logFilterType && this.logFilterType !== 'all') {
+                        filtered = filtered.filter(log => log.type === this.logFilterType);
+                    }
+                    
+                    if (this.logSearchQuery) {
+                        const query = this.logSearchQuery.toLowerCase();
+                        filtered = filtered.filter(log => 
+                            log.message.toLowerCase().includes(query) || 
+                            (log.details && log.details.toLowerCase().includes(query))
+                        );
+                    }
+                    
+                    return filtered;
+                },
+                
+                // Бизнес-функции
+                testConnection(id) {
+                    const connection = this.connections.find(c => c.id === id);
+                    if (!connection) return;
+                    
+                    this.showNotification(`Тестирование подключения к ${connection.name}...`, 'info');
+                    
+                    setTimeout(() => {
+                        connection.status = 'active';
+                        connection.lastSync = new Date().toLocaleString('ru-RU');
+                        
+                        this.showNotification(`Подключение к ${connection.name} успешно протестировано`, 'success');
+                        this.addLog('success', `Тест подключения CRM успешен`, `Клиент: ${connection.clientName}`);
+                    }, 1500);
+                },
+                
+                syncConnection(id) {
+                    const connection = this.connections.find(c => c.id === id);
+                    if (!connection) return;
+                    
+                    this.showNotification(`Синхронизация данных с ${connection.name}...`, 'info');
+                    
+                    setTimeout(() => {
+                        const newLeads = Math.floor(Math.random() * 5) + 1;
+                        const newConversions = Math.floor(Math.random() * 3);
+                        
+                        connection.leadsToday += newLeads;
+                        connection.conversionsToday += newConversions;
+                        connection.lastSync = new Date().toLocaleString('ru-RU');
+                        
+                        this.todaysStats.leads += newLeads;
+                        this.todaysStats.conversions += newConversions;
+                        
+                        this.showNotification(
+                            `Синхронизация завершена. Новые лиды: ${newLeads}, конверсии: ${newConversions}`, 
+                            'success'
+                        );
+                        
+                        this.addLog('success', `Синхронизация CRM завершена`, 
+                            `Клиент: ${connection.clientName}, Лиды: +${newLeads}, Конверсии: +${newConversions}`);
+                    }, 2000);
+                },
+                
+                testAllConnections() {
+                    this.showNotification('Тестирование всех подключений...', 'info');
+                    
+                    let tested = 0;
+                    const total = this.connections.length;
+                    
+                    this.connections.forEach((conn, index) => {
+                        setTimeout(() => {
+                            conn.status = 'active';
+                            conn.lastSync = new Date().toLocaleString('ru-RU');
+                            tested++;
+                            
+                            if (tested === total) {
+                                this.showNotification(`Все подключения (${total}) успешно протестированы`, 'success');
+                                this.addLog('success', 'Тест всех подключений завершен', `Проверено: ${total} подключений`);
+                            }
+                        }, index * 500);
+                    });
+                },
+                
+                syncAllData() {
+                    this.showNotification('Запуск полной синхронизации всех данных...', 'info');
+                    
+                    let synced = 0;
+                    const activeConnections = this.connections.filter(c => c.status === 'active');
+                    const total = activeConnections.length;
+                    
+                    if (total === 0) {
+                        this.showNotification('Нет активных подключений для синхронизации', 'warning');
+                        return;
+                    }
+                    
+                    activeConnections.forEach((conn, index) => {
+                        setTimeout(() => {
+                            const newLeads = Math.floor(Math.random() * 3) + 1;
+                            const newConversions = Math.floor(Math.random() * 2);
+                            
+                            conn.leadsToday += newLeads;
+                            conn.conversionsToday += newConversions;
+                            conn.lastSync = new Date().toLocaleString('ru-RU');
+                            
+                            this.todaysStats.leads += newLeads;
+                            this.todaysStats.conversions += newConversions;
+                            
+                            synced++;
+                            
+                            if (synced === total) {
+                                this.showNotification(
+                                    `Полная синхронизация завершена. Обработано подключений: ${total}`, 
+                                    'success'
+                                );
+                                this.addLog('success', 'Полная синхронизация данных', 
+                                    `Обработано: ${total} подключений, Новые лиды: ${this.todaysStats.leads}`);
+                            }
+                        }, index * 1000);
+                    });
+                },
+                
+                // Функции для работы с логами
+                addLog(type, message, details = '') {
+                    const newLog = {
+                        id: this.logs.length + 1,
+                        timestamp: new Date().toLocaleString('ru-RU'),
+                        type: type,
+                        message: message,
+                        details: details
+                    };
+                    
+                    this.logs.unshift(newLog);
+                    
+                    if (this.logs.length > 50) {
+                        this.logs.pop();
+                    }
+                    
+                    if (type === 'error') {
+                        this.todaysStats.errors++;
+                        this.recentErrors.unshift({
+                            id: this.recentErrors.length + 1,
+                            time: 'Только что',
+                            message: message
+                        });
+                        
+                        if (this.recentErrors.length > 5) {
+                            this.recentErrors.pop();
+                        }
+                    }
+                },
+                
+                // Уведомления
+                showNotification(message, type = 'info') {
+                    const notificationId = 'notification-' + Date.now();
+                    const alertClass = {
+                        'success': 'alert-success',
+                        'error': 'alert-danger',
+                        'warning': 'alert-warning',
+                        'info': 'alert-info'
+                    }[type] || 'alert-info';
+                    
+                    const icon = {
+                        'success': 'check-circle',
+                        'error': 'exclamation-triangle',
+                        'warning': 'exclamation-circle',
+                        'info': 'info-circle'
+                    }[type] || 'info-circle';
+                    
+                    const notification = `
+                        <div id="${notificationId}" class="alert ${alertClass} alert-dismissible fade show position-fixed" 
+                            style="top: 70px; right: 20px; z-index: 9999; min-width: 300px;">
+                            <i class="fas fa-${icon} me-2"></i> ${message}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    `;
+                    
+                    document.body.insertAdjacentHTML('beforeend', notification);
+                    
+                    setTimeout(() => {
+                        const element = document.getElementById(notificationId);
+                        if (element) {
+                            element.remove();
+                        }
+                    }, 5000);
+                },
+                
+                // Функции для страницы настроек
+                saveSettings() {
+                    this.showNotification('Настройки успешно сохранены', 'success');
+                    this.addLog('success', 'Настройки системы обновлены', 'Пользовательские настройки сохранены');
+                },
+                
+                copyWebhookUrl() {
+                    navigator.clipboard.writeText(this.settings.webhookUrl)
+                        .then(() => this.showNotification('Webhook URL скопирован в буфер обмена', 'success'))
+                        .catch(() => this.showNotification('Не удалось скопировать URL', 'error'));
+                },
+                
+                resetSystem() {
+                    if (confirm('Вы уверены, что хотите сбросить все настройки системы? Это действие нельзя отменить.')) {
+                        this.showNotification('Сброс системы...', 'info');
+                        
+                        setTimeout(() => {
+                            this.settings = {
+                                systemName: 'Агрегатор данных из CRM',
+                                syncInterval: 30,
+                                logRetentionDays: 30,
+                                notifications: {
+                                    errors: true,
+                                    syncComplete: true,
+                                    dailyReport: false
+                                },
+                                yandexApiKey: '••••••••',
+                                webhookUrl: 'https://api.aggregator.ru/webhook/landing',
+                                version: '1.0.0'
+                            };
+                            
+                            this.showNotification('Система сброшена к настройкам по умолчанию', 'success');
+                            this.addLog('warning', 'Система сброшена', 'Все настройки восстановлены к значениям по умолчанию');
+                        }, 1000);
+                    }
+                },
+                
+                // Функции для страницы мониторинга
+                refreshMonitoring() {
+                    this.showNotification('Обновление данных мониторинга...', 'info');
+                    
+                    setTimeout(() => {
+                        this.systemHealth.avgResponseTime = Math.floor(Math.random() * 100) + 200;
+                        this.systemHealth.processedToday += Math.floor(Math.random() * 10);
+                        
+                        this.showNotification('Данные мониторинга обновлены', 'success');
+                    }, 800);
+                },
+                
+                generateReport() {
+                    this.showNotification('Генерация отчета...', 'info');
+                    
+                    setTimeout(() => {
+                        const reportData = {
+                            date: new Date().toLocaleDateString('ru-RU'),
+                            connections: this.connections.length,
+                            activeConnections: this.connections.filter(c => c.status === 'active').length,
+                            totalLeads: this.todaysStats.leads,
+                            totalConversions: this.todaysStats.conversions,
+                            errors: this.todaysStats.errors
+                        };
+                        
+                        const reportContent = `
+Отчет системы "Агрегатор данных из CRM"
+Дата: ${reportData.date}
+
+Статистика:
+- Всего подключений: ${reportData.connections}
+- Активных подключений: ${reportData.activeConnections}
+- Лидов за сегодня: ${reportData.totalLeads}
+- Конверсий за сегодня: ${reportData.totalConversions}
+- Ошибок за сегодня: ${reportData.errors}
+
+Детальная информация доступна в веб-интерфейсе.
+                        `;
+                        
+                        const blob = new Blob([reportContent], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `отчет_агрегатор_${new Date().toISOString().split('T')[0]}.txt`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        
+                        this.showNotification('Отчет успешно сгенерирован и скачан', 'success');
+                        this.addLog('success', 'Сгенерирован отчет', 'Отчет о работе системы скачан');
+                    }, 1500);
+                },
+                
+                simulateActivity() {
+                    this.showNotification('Генерация тестовых данных...', 'info');
+                    
+                    const activities = [
+                        'Получен новый лид с лендинга',
+                        'Отправлены данные в CRM',
+                        'Обновлен статус сделки',
+                        'Отправлена конверсия в Яндекс.Директ'
+                    ];
+                    
+                    activities.forEach((activity, index) => {
+                        setTimeout(() => {
+                            this.addLog('success', activity, 'Тестовая активность');
+                            
+                            if (index === activities.length - 1) {
+                                this.showNotification('Тестовые данные сгенерированы', 'success');
+                            }
+                        }, index * 500);
+                    });
+                },
+                
+                resolveError(id) {
+                    const errorIndex = this.recentErrors.findIndex(e => e.id === id);
+                    if (errorIndex !== -1) {
+                        this.recentErrors.splice(errorIndex, 1);
+                        this.showNotification('Ошибка помечена как исправленная', 'success');
+                    }
+                },
+                
+                // Функции для страницы логов
+                clearLogs() {
+                    if (confirm('Вы уверены, что хотите очистить все логи? Это действие нельзя отменить.')) {
+                        this.logs = [];
+                        this.showNotification('Логи очищены', 'success');
+                    }
+                },
+                
+                exportLogs() {
+                    this.showNotification('Подготовка логов к экспорту...', 'info');
+                    
+                    setTimeout(() => {
+                        const logContent = this.logs.map(log => 
+                            `[${log.timestamp}] ${log.type.toUpperCase()}: ${log.message} ${log.details ? ' - ' + log.details : ''}`
+                        ).join('\n');
+                        
+                        const blob = new Blob([logContent], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `логи_агрегатор_${new Date().toISOString().split('T')[0]}.txt`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        
+                        this.showNotification('Логи успешно экспортированы', 'success');
+                        this.addLog('success', 'Экспорт логов', 'Все логи системы экспортированы в файл');
+                    }, 1000);
+                },
+                
+                viewLogDetails(id) {
+                    const log = this.logs.find(l => l.id === id);
+                    if (log) {
+                        alert(`Детали лога:\n\nСообщение: ${log.message}\nТип: ${log.type}\nВремя: ${log.timestamp}\nДетали: ${log.details || 'Нет'}`);
+                    }
+                },
+                
+                loadMoreLogs() {
+                    this.showNotification('Загрузка дополнительных логов...', 'info');
+                    
+                    setTimeout(() => {
+                        const newLogs = [
+                            {
+                                id: this.logs.length + 1,
+                                timestamp: new Date().toLocaleString('ru-RU'),
+                                type: 'success',
+                                message: 'Загружены дополнительные логи',
+                                details: 'Системная операция'
+                            },
+                            {
+                                id: this.logs.length + 2,
+                                timestamp: new Date().toLocaleString('ru-RU'),
+                                type: 'info',
+                                message: 'Тестовая запись лога',
+                                details: 'Запись добавлена при нажатии кнопки "Загрузить еще"'
+                            }
+                        ];
+                        
+                        this.logs.push(...newLogs);
+                        this.showNotification('Дополнительные логи загружены', 'success');
+                    }, 800);
+                },
+                
+                filterLogs() {
+                    this.showNotification('Логи отфильтрованы по заданным критериям', 'info');
+                },
+                
+                // Модальные окна
+                openModal(modalType, data = null) {
+                    let modalHtml = '';
+                    
+                    switch(modalType) {
+                        case 'newConnection':
+                            modalHtml = this.newConnectionModal();
+                            break;
+                        case 'newMapping':
+                            modalHtml = this.newMappingModal();
+                            break;
+                    }
+                    
+                    const modalsContainer = document.getElementById('modalsContainer');
+                    modalsContainer.innerHTML = modalHtml;
+                    
+                    const modalElement = document.getElementById('dynamicModal');
+                    if (modalElement) {
+                        const modal = new bootstrap.Modal(modalElement);
+                        modal.show();
+                        
+                        modalElement.addEventListener('hidden.bs.modal', function() {
+                            modalsContainer.innerHTML = '';
+                        });
+                    }
+                },
+                
+                newConnectionModal() {
+                    return `
+                        <div class="modal fade" id="dynamicModal" tabindex="-1">
+                            <div class="modal-dialog modal-lg">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title"><i class="fas fa-plug me-2"></i> Новое подключение CRM</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <form id="newConnectionForm" @submit.prevent="saveNewConnection">
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">Название подключения *</label>
+                                                    <input type="text" class="form-control" required 
+                                                        placeholder="Например: Битрикс24 - ООО Ромашка">
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">Клиент *</label>
+                                                    <input type="text" class="form-control" required 
+                                                        placeholder="Название клиента">
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">Тип CRM *</label>
+                                                    <select class="form-select" required>
+                                                        <option value="">Выберите тип CRM</option>
+                                                        <option value="bitrix24">Битрикс24</option>
+                                                        <option value="amocrm">AmoCRM</option>
+                                                        <option value="retailcrm">RetailCRM</option>
+                                                        <option value="other">Другая</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">URL CRM *</label>
+                                                    <input type="url" class="form-control" required 
+                                                        placeholder="https://ваш-домен.crm.ru">
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label class="form-label">API ключ *</label>
+                                                <div class="input-group">
+                                                    <input type="password" class="form-control" required 
+                                                        placeholder="Введите API ключ">
+                                                    <button class="btn btn-outline-secondary" type="button" 
+                                                            onclick="this.parentElement.querySelector('input').type = 
+                                                                    this.parentElement.querySelector('input').type === 'password' ? 'text' : 'password'">
+                                                        <i class="fas fa-eye"></i>
+                                                    </button>
+                                                </div>
+                                                <small class="text-muted">API ключ можно получить в настройках вашей CRM системы</small>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label class="form-label">Дополнительные настройки</label>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" checked>
+                                                    <label class="form-check-label">
+                                                        Автоматически синхронизировать каждые 30 минут
+                                                    </label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" checked>
+                                                    <label class="form-check-label">
+                                                        Отправлять уведомления об ошибках
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </form>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                                        <button type="submit" form="newConnectionForm" class="btn btn-primary">
+                                            <i class="fas fa-save me-2"></i> Сохранить подключение
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                saveNewConnection() {
+                    const newId = Math.max(...this.connections.map(c => c.id)) + 1;
+                    
+                    const newConnection = {
+                        id: newId,
+                        name: 'Новое подключение ' + newId,
+                        type: 'bitrix24',
+                        url: 'https://new-client.bitrix24.ru',
+                        apiKey: '••••••••',
+                        clientName: 'Новый клиент',
+                        status: 'active',
+                        lastSync: new Date().toLocaleString('ru-RU'),
+                        leadsToday: 0,
+                        conversionsToday: 0
+                    };
+                    
+                    this.connections.push(newConnection);
+                    this.showNotification('Новое подключение успешно создано', 'success');
+                    this.addLog('success', 'Создано новое подключение', `Клиент: ${newConnection.clientName}`);
+                    
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('dynamicModal'));
+                    if (modal) modal.hide();
+                    
+                    setTimeout(() => this.changePage('connections'), 300);
+                },
+                
+                newMappingModal() {
+                    return `
+                        <div class="modal fade" id="dynamicModal" tabindex="-1">
+                            <div class="modal-dialog modal-lg">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title"><i class="fas fa-exchange-alt me-2"></i> Новое сопоставление</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <p class="text-muted">Здесь будет форма для создания нового сопоставления данных</p>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                                        <button type="button" class="btn btn-primary">
+                                            <i class="fas fa-save me-2"></i> Сохранить
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                // Дополнительные функции
+                refreshDashboard() {
+                    this.showNotification('Дашборд обновлен', 'success');
+                },
+                
+                viewConnection(id) {
+                    this.showNotification(`Просмотр подключения ID: ${id}`, 'info');
+                },
+                
+                editConnection(id) {
+                    this.showNotification(`Редактирование подключения ID: ${id}`, 'info');
+                },
+                
+                deleteConnection(id) {
+                    if (confirm('Вы уверены, что хотите удалить это подключение?')) {
+                        const index = this.connections.findIndex(c => c.id === id);
+                        if (index !== -1) {
+                            this.connections.splice(index, 1);
+                            this.showNotification('Подключение удалено', 'success');
+                        }
+                    }
+                },
+                
+                exportConnections() {
+                    this.showNotification('Экспорт подключений в формате CSV', 'info');
+                },
+                
+                editMapping(id) {
+                    this.showNotification(`Редактирование шаблона ID: ${id}`, 'info');
+                },
+                
+                testMapping(id) {
+                    this.showNotification(`Тестирование шаблона ID: ${id}`, 'info');
+                },
+                
+                deleteMapping(id) {
+                    if (confirm('Вы уверены, что хотите удалить этот шаблон сопоставления?')) {
+                        const index = this.mappings.findIndex(m => m.id === id);
+                        if (index !== -1) {
+                            this.mappings.splice(index, 1);
+                            this.showNotification('Шаблон удален', 'success');
+                        }
+                    }
+                }
+            };
+        }
+    </script>
+</body>
+</html>
