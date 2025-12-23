@@ -7,6 +7,23 @@ A complete full-stack application for aggregating and transforming CRM data, bui
 ![Bootstrap](https://img.shields.io/badge/Bootstrap-7952B3?style=for-the-badge&logo=bootstrap&logoColor=white)
 ![MVC](https://img.shields.io/badge/Architecture-MVC-blue?style=for-the-badge)
 
+```mermaid
+sequenceDiagram
+    participant Лид
+    participant Лендинг
+    participant Агрегатор
+    participant CRM
+    participant Яндекс.Директ
+
+    Лид->>Лендинг: Заполняет форму
+    Лендинг->>Агрегатор: Отправка данных формы
+    Агрегатор->>CRM: Передача данных в CRM клиента
+    Лид-->>CRM: Офлайн‑оплата
+    CRM->>Агрегатор: Отправка данных об оплате
+    Агрегатор->>Яндекс.Директ: Передача информации о платеже
+
+```
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
