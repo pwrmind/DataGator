@@ -280,6 +280,8 @@
         // Основная функция приложения
         function app() {
             return {
+                // Базовый URL backend API (замените на ваш реальный адрес при необходимости)
+                apiBaseUrl: 'http://localhost/api',
                 // Текущее состояние приложения
                 currentPage: 'dashboard',
                 sidebarActive: false,
@@ -458,8 +460,92 @@
                     }, 1000);
                 },
                 
-                loadInitialData() {
-                    console.log('Загрузка начальных данных...');
+                async loadInitialData() {
+                    console.log('Загрузка начальных данных из backend API...');
+                    
+                    try {
+                        // Загрузка статистики дашборда
+                        const dashboardStats = await this.apiGet('/stats/dashboard');
+                        if (dashboardStats && dashboardStats.data) {
+                            const ts = dashboardStats.data.todays_stats;
+                            const ms = dashboardStats.data.monitoring_stats;
+                            
+                            if (ts) {
+                                this.todaysStats = {
+                                    leads: ts.leads,
+                                    conversions: ts.conversions,
+                                    errors: ts.errors,
+                                    activeConnections: ts.active_connections
+                                };
+                            }
+                            
+                            if (ms) {
+                                this.systemHealth = {
+                                    overall: ms.system_health.overall,
+                                    activeStreams: ms.system_health.active_streams,
+                                    totalStreams: ms.system_health.total_streams,
+                                    avgResponseTime: ms.system_health.avg_response_time,
+                                    processedToday: ms.system_health.processed_today
+                                };
+                                
+                                this.transferStats = {
+                                    landingToCRM: {
+                                        success: ms.transfer_stats.landing_to_crm.success,
+                                        errors: ms.transfer_stats.landing_to_crm.errors,
+                                        pending: ms.transfer_stats.landing_to_crm.pending,
+                                        total: ms.transfer_stats.landing_to_crm.total,
+                                        successRate: ms.transfer_stats.landing_to_crm.success_rate
+                                    },
+                                    crmToYandex: {
+                                        success: ms.transfer_stats.crm_to_yandex.success,
+                                        errors: ms.transfer_stats.crm_to_yandex.errors,
+                                        pending: ms.transfer_stats.crm_to_yandex.pending,
+                                        total: ms.transfer_stats.crm_to_yandex.total,
+                                        successRate: ms.transfer_stats.crm_to_yandex.success_rate
+                                    }
+                                };
+                                
+                                this.recentErrors = ms.recent_errors || this.recentErrors;
+                            }
+                        }
+                        
+                        // Подключения
+                        const connectionsResp = await this.apiGet('/connections');
+                        if (connectionsResp && Array.isArray(connectionsResp.data)) {
+                            this.connections = connectionsResp.data.map(this.mapConnectionFromApi);
+                        }
+                        
+                        // Шаблоны сопоставления
+                        const mappingsResp = await this.apiGet('/mappings');
+                        if (mappingsResp && Array.isArray(mappingsResp.data)) {
+                            this.mappings = mappingsResp.data.map(this.mapMappingFromApi);
+                        }
+                        
+                        // Логи
+                        const logsResp = await this.apiGet('/logs');
+                        if (logsResp && Array.isArray(logsResp.data)) {
+                            this.logs = logsResp.data.map(this.mapLogFromApi);
+                        }
+                        
+                        // Настройки
+                        const settingsResp = await this.apiGet('/settings');
+                        if (settingsResp && settingsResp.data && settingsResp.data.settings) {
+                            const s = settingsResp.data.settings;
+                            this.settings.systemName = s.system_name || this.settings.systemName;
+                            this.settings.syncInterval = Number(s.sync_interval || this.settings.syncInterval);
+                            this.settings.logRetentionDays = Number(s.log_retention_days || this.settings.logRetentionDays);
+                            this.settings.notifications.errors = s.notifications_errors === 'true' || s.notifications_errors === true;
+                            this.settings.notifications.syncComplete = s.notifications_sync_complete === 'true' || s.notifications_sync_complete === true;
+                            this.settings.notifications.dailyReport = s.notifications_daily_report === 'true' || s.notifications_daily_report === true;
+                            this.settings.yandexApiKey = s.yandex_api_key || this.settings.yandexApiKey;
+                            this.settings.webhookUrl = s.webhook_url || this.settings.webhookUrl;
+                        }
+                        
+                        this.showNotification('Данные успешно загружены из backend', 'success');
+                    } catch (e) {
+                        console.error('Ошибка загрузки данных:', e);
+                        this.showNotification('Не удалось загрузить данные с сервера', 'error');
+                    }
                 },
                 
                 // Навигация
@@ -1441,6 +1527,107 @@
                 },
                 
                 // Вспомогательные функции
+                apiUrl(path) {
+                    return this.apiBaseUrl.replace(/\/+$/, '') + path;
+                },
+                
+                async apiGet(path) {
+                    const response = await fetch(this.apiUrl(path), {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
+                    return this.handleApiResponse(response);
+                },
+                
+                async apiPost(path, body = null) {
+                    const response = await fetch(this.apiUrl(path), {
+                        method: 'POST',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: body ? JSON.stringify(body) : null
+                    });
+                    return this.handleApiResponse(response);
+                },
+                
+                async apiPut(path, body = null) {
+                    const response = await fetch(this.apiUrl(path), {
+                        method: 'PUT',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: body ? JSON.stringify(body) : null
+                    });
+                    return this.handleApiResponse(response);
+                },
+                
+                async apiDelete(path) {
+                    const response = await fetch(this.apiUrl(path), {
+                        method: 'DELETE',
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
+                    return this.handleApiResponse(response);
+                },
+                
+                async handleApiResponse(response) {
+                    let json;
+                    try {
+                        json = await response.json();
+                    } catch (e) {
+                        throw new Error('Некорректный ответ сервера');
+                    }
+                    
+                    if (!response.ok || json.error) {
+                        const msg = json.message || 'Ошибка запроса к серверу';
+                        throw new Error(msg);
+                    }
+                    
+                    return json;
+                },
+                
+                mapConnectionFromApi(apiConn) {
+                    return {
+                        id: apiConn.id,
+                        name: apiConn.name,
+                        type: apiConn.type,
+                        url: apiConn.url,
+                        apiKey: apiConn.api_key || '••••••••',
+                        clientName: apiConn.client_name,
+                        status: apiConn.status,
+                        lastSync: apiConn.last_sync 
+                            ? new Date(apiConn.last_sync).toLocaleString('ru-RU') 
+                            : '',
+                        leadsToday: apiConn.leads_today ?? 0,
+                        conversionsToday: apiConn.conversions_today ?? 0
+                    };
+                },
+                
+                mapMappingFromApi(apiMapping) {
+                    return {
+                        id: apiMapping.id,
+                        name: apiMapping.name,
+                        sourceSystem: apiMapping.source_system,
+                        targetSystem: apiMapping.target_system,
+                        fields: apiMapping.fields || []
+                    };
+                },
+                
+                mapLogFromApi(apiLog) {
+                    return {
+                        id: apiLog.id,
+                        timestamp: apiLog.timestamp,
+                        type: apiLog.type,
+                        message: apiLog.message,
+                        details: apiLog.details
+                    };
+                },
+                
                 getCRMTypeName(type) {
                     const types = {
                         'bitrix24': 'Битрикс24',
@@ -1507,13 +1694,25 @@
                     
                     this.showNotification(`Тестирование подключения к ${connection.name}...`, 'info');
                     
-                    setTimeout(() => {
-                        connection.status = 'active';
-                        connection.lastSync = new Date().toLocaleString('ru-RU');
-                        
-                        this.showNotification(`Подключение к ${connection.name} успешно протестировано`, 'success');
-                        this.addLog('success', `Тест подключения CRM успешен`, `Клиент: ${connection.clientName}`);
-                    }, 1500);
+                    this.apiPost(`/connections/${id}/test`)
+                        .then(resp => {
+                            if (resp && resp.data && resp.data.connection) {
+                                const updated = this.mapConnectionFromApi(resp.data.connection);
+                                const idx = this.connections.findIndex(c => c.id === updated.id);
+                                if (idx !== -1) {
+                                    this.connections.splice(idx, 1, updated);
+                                }
+                            }
+                            
+                            const msg = resp.data && resp.data.message
+                                ? resp.data.message
+                                : 'Тест подключения завершен';
+                            this.showNotification(msg, 'success');
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            this.showNotification(err.message || 'Ошибка при тестировании подключения', 'error');
+                        });
                 },
                 
                 syncConnection(id) {
@@ -1522,45 +1721,64 @@
                     
                     this.showNotification(`Синхронизация данных с ${connection.name}...`, 'info');
                     
-                    setTimeout(() => {
-                        const newLeads = Math.floor(Math.random() * 5) + 1;
-                        const newConversions = Math.floor(Math.random() * 3);
-                        
-                        connection.leadsToday += newLeads;
-                        connection.conversionsToday += newConversions;
-                        connection.lastSync = new Date().toLocaleString('ru-RU');
-                        
-                        this.todaysStats.leads += newLeads;
-                        this.todaysStats.conversions += newConversions;
-                        
-                        this.showNotification(
-                            `Синхронизация завершена. Новые лиды: ${newLeads}, конверсии: ${newConversions}`, 
-                            'success'
-                        );
-                        
-                        this.addLog('success', `Синхронизация CRM завершена`, 
-                            `Клиент: ${connection.clientName}, Лиды: +${newLeads}, Конверсии: +${newConversions}`);
-                    }, 2000);
+                    this.apiPost(`/connections/${id}/sync`)
+                        .then(resp => {
+                            if (resp && resp.data && resp.data.connection) {
+                                const updated = this.mapConnectionFromApi(resp.data.connection);
+                                const idx = this.connections.findIndex(c => c.id === updated.id);
+                                if (idx !== -1) {
+                                    this.connections.splice(idx, 1, updated);
+                                }
+                            }
+                            
+                            if (resp && resp.data && resp.data.sync_results) {
+                                const r = resp.data.sync_results;
+                                const newLeads = r.new_leads || 0;
+                                const newConversions = r.new_conversions || 0;
+                                this.todaysStats.leads += newLeads;
+                                this.todaysStats.conversions += newConversions;
+                                
+                                this.showNotification(
+                                    `Синхронизация завершена. Новые лиды: ${newLeads}, конверсии: ${newConversions}`,
+                                    'success'
+                                );
+                            } else {
+                                this.showNotification('Синхронизация завершена', 'success');
+                            }
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            this.showNotification(err.message || 'Ошибка при синхронизации подключения', 'error');
+                        });
                 },
                 
                 testAllConnections() {
                     this.showNotification('Тестирование всех подключений...', 'info');
                     
-                    let tested = 0;
-                    const total = this.connections.length;
-                    
-                    this.connections.forEach((conn, index) => {
-                        setTimeout(() => {
-                            conn.status = 'active';
-                            conn.lastSync = new Date().toLocaleString('ru-RU');
-                            tested++;
-                            
-                            if (tested === total) {
-                                this.showNotification(`Все подключения (${total}) успешно протестированы`, 'success');
-                                this.addLog('success', 'Тест всех подключений завершен', `Проверено: ${total} подключений`);
+                    this.apiGet('/connections/test-all')
+                        .then(resp => {
+                            if (resp && resp.data && Array.isArray(resp.data.results)) {
+                                resp.data.results.forEach(r => {
+                                    const idx = this.connections.findIndex(c => c.id === r.id);
+                                    if (idx !== -1) {
+                                        this.connections[idx].status = r.status;
+                                        if (r.success) {
+                                            this.connections[idx].lastSync = new Date().toLocaleString('ru-RU');
+                                        }
+                                    }
+                                });
                             }
-                        }, index * 500);
-                    });
+                            
+                            const total = resp && resp.data ? resp.data.total_tested : this.connections.length;
+                            this.showNotification(
+                                `Тест всех подключений завершен. Проверено: ${total}`,
+                                'success'
+                            );
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            this.showNotification(err.message || 'Ошибка при тестировании всех подключений', 'error');
+                        });
                 },
                 
                 syncAllData() {
@@ -1668,8 +1886,26 @@
                 
                 // Функции для страницы настроек
                 saveSettings() {
-                    this.showNotification('Настройки успешно сохранены', 'success');
-                    this.addLog('success', 'Настройки системы обновлены', 'Пользовательские настройки сохранены');
+                    const updates = [
+                        { key: 'system_name', value: this.settings.systemName },
+                        { key: 'sync_interval', value: String(this.settings.syncInterval) },
+                        { key: 'log_retention_days', value: String(this.settings.logRetentionDays) },
+                        { key: 'notifications_errors', value: this.settings.notifications.errors ? 'true' : 'false' },
+                        { key: 'notifications_sync_complete', value: this.settings.notifications.syncComplete ? 'true' : 'false' },
+                        { key: 'notifications_daily_report', value: this.settings.notifications.dailyReport ? 'true' : 'false' },
+                        { key: 'yandex_api_key', value: this.settings.yandexApiKey }
+                    ];
+                    
+                    Promise.all(
+                        updates.map(u => this.apiPost(`/settings/update-by-key?key=${encodeURIComponent(u.key)}`, { value: u.value }))
+                    )
+                        .then(() => {
+                            this.showNotification('Настройки успешно сохранены', 'success');
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            this.showNotification(err.message || 'Ошибка при сохранении настроек', 'error');
+                        });
                 },
                 
                 copyWebhookUrl() {
@@ -1895,12 +2131,12 @@
                                             <div class="row">
                                                 <div class="col-md-6 mb-3">
                                                     <label class="form-label">Название подключения *</label>
-                                                    <input type="text" class="form-control" required 
+                                                    <input id="newConnName" type="text" class="form-control" required 
                                                         placeholder="Например: Битрикс24 - ООО Ромашка">
                                                 </div>
                                                 <div class="col-md-6 mb-3">
                                                     <label class="form-label">Клиент *</label>
-                                                    <input type="text" class="form-control" required 
+                                                    <input id="newConnClient" type="text" class="form-control" required 
                                                         placeholder="Название клиента">
                                                 </div>
                                             </div>
@@ -1908,7 +2144,7 @@
                                             <div class="row">
                                                 <div class="col-md-6 mb-3">
                                                     <label class="form-label">Тип CRM *</label>
-                                                    <select class="form-select" required>
+                                                    <select id="newConnType" class="form-select" required>
                                                         <option value="">Выберите тип CRM</option>
                                                         <option value="bitrix24">Битрикс24</option>
                                                         <option value="amocrm">AmoCRM</option>
@@ -1918,7 +2154,7 @@
                                                 </div>
                                                 <div class="col-md-6 mb-3">
                                                     <label class="form-label">URL CRM *</label>
-                                                    <input type="url" class="form-control" required 
+                                                    <input id="newConnUrl" type="url" class="form-control" required 
                                                         placeholder="https://ваш-домен.crm.ru">
                                                 </div>
                                             </div>
@@ -1926,7 +2162,7 @@
                                             <div class="mb-3">
                                                 <label class="form-label">API ключ *</label>
                                                 <div class="input-group">
-                                                    <input type="password" class="form-control" required 
+                                                    <input id="newConnApiKey" type="password" class="form-control" required 
                                                         placeholder="Введите API ключ">
                                                     <button class="btn btn-outline-secondary" type="button" 
                                                             onclick="this.parentElement.querySelector('input').type = 
@@ -1967,29 +2203,41 @@
                 },
                 
                 saveNewConnection() {
-                    const newId = Math.max(...this.connections.map(c => c.id)) + 1;
+                    const form = document.getElementById('newConnectionForm');
+                    if (!form) return;
                     
-                    const newConnection = {
-                        id: newId,
-                        name: 'Новое подключение ' + newId,
-                        type: 'bitrix24',
-                        url: 'https://new-client.bitrix24.ru',
-                        apiKey: '••••••••',
-                        clientName: 'Новый клиент',
-                        status: 'active',
-                        lastSync: new Date().toLocaleString('ru-RU'),
-                        leadsToday: 0,
-                        conversionsToday: 0
+                    const nameInput = document.getElementById('newConnName');
+                    const clientInput = document.getElementById('newConnClient');
+                    const typeSelect = document.getElementById('newConnType');
+                    const urlInput = document.getElementById('newConnUrl');
+                    const apiInput = document.getElementById('newConnApiKey');
+                    
+                    const payload = {
+                        name: nameInput ? nameInput.value : '',
+                        client_name: clientInput ? clientInput.value : '',
+                        type: typeSelect ? typeSelect.value : '',
+                        url: urlInput ? urlInput.value : '',
+                        api_key: apiInput ? apiInput.value : ''
                     };
                     
-                    this.connections.push(newConnection);
-                    this.showNotification('Новое подключение успешно создано', 'success');
-                    this.addLog('success', 'Создано новое подключение', `Клиент: ${newConnection.clientName}`);
-                    
-                    const modal = bootstrap.Modal.getInstance(document.getElementById('dynamicModal'));
-                    if (modal) modal.hide();
-                    
-                    setTimeout(() => this.changePage('connections'), 300);
+                    this.apiPost('/connections', payload)
+                        .then(resp => {
+                            if (resp && resp.data) {
+                                const created = this.mapConnectionFromApi(resp.data);
+                                this.connections.push(created);
+                            }
+                            
+                            this.showNotification('Новое подключение успешно создано', 'success');
+                            
+                            const modal = bootstrap.Modal.getInstance(document.getElementById('dynamicModal'));
+                            if (modal) modal.hide();
+                            
+                            setTimeout(() => this.changePage('connections'), 300);
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            this.showNotification(err.message || 'Ошибка при создании подключения', 'error');
+                        });
                 },
                 
                 newMappingModal() {
@@ -2030,13 +2278,22 @@
                 },
                 
                 deleteConnection(id) {
-                    if (confirm('Вы уверены, что хотите удалить это подключение?')) {
-                        const index = this.connections.findIndex(c => c.id === id);
-                        if (index !== -1) {
-                            this.connections.splice(index, 1);
-                            this.showNotification('Подключение удалено', 'success');
-                        }
+                    if (!confirm('Вы уверены, что хотите удалить это подключение?')) {
+                        return;
                     }
+                    
+                    this.apiDelete(`/connections/${id}`)
+                        .then(() => {
+                            const index = this.connections.findIndex(c => c.id === id);
+                            if (index !== -1) {
+                                this.connections.splice(index, 1);
+                            }
+                            this.showNotification('Подключение удалено', 'success');
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            this.showNotification(err.message || 'Ошибка при удалении подключения', 'error');
+                        });
                 },
                 
                 exportConnections() {
