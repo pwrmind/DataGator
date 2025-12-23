@@ -1,0 +1,26 @@
+{
+    "default_crm": {
+        "crm_type": "generic",
+        "api_endpoint": "https://example-crm.com/api/leads",
+        "api_key": "your_api_key_here",
+        "field_mapping": {
+            "name": "contact_name",
+            "phone": "phone_number",
+            "email": "email"
+        }
+    },
+    "crm_mappings": [
+        {
+            "landing_id": "landing1",
+            "crm_config": {
+                "crm_type": "amocrm",
+                "api_endpoint": "https://yourdomain.amocrm.ru",
+                "access_token": "your_access_token"
+            }
+        }
+    ],
+    "yandex_direct": {
+        "oauth_token": "your_oauth_token",
+        "campaign_id": "your_campaign_id"
+    }
+}
