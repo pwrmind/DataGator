@@ -1,0 +1,63 @@
+{
+    "default_crm": {
+        "crm_id": "default",
+        "crm_type": "generic",
+        "api_endpoint": "https://example-crm.com/api/leads",
+        "api_key": "your_api_key_here",
+        "field_mapping": {
+            "name": "contact_name",
+            "phone": "phone_number",
+            "email": "email"
+        },
+        "webhook_secret": "your_webhook_secret"
+    },
+    "crm_configs": [
+        {
+            "crm_id": "crm1",
+            "crm_type": "amocrm",
+            "api_endpoint": "https://yourdomain.amocrm.ru",
+            "access_token": "your_access_token",
+            "webhook_secret": "secret_for_crm1"
+        },
+        {
+            "crm_id": "crm2",
+            "crm_type": "bitrix24",
+            "api_endpoint": "https://yourcompany.bitrix24.ru/rest",
+            "webhook_secret": "secret_for_crm2"
+        }
+    ],
+    "landing_crm_mappings": [
+        {
+            "landing_id": "landing1",
+            "crm_id": "crm1"
+        },
+        {
+            "landing_id": "landing2",
+            "crm_id": "crm2"
+        }
+    ],
+    "campaign_crm_mappings": [
+        {
+            "campaign_id": "campaign123",
+            "crm_id": "crm1"
+        },
+        {
+            "campaign_id": "campaign456",
+            "crm_id": "crm2"
+        }
+    ],
+    "yandex_direct": {
+        "campaigns": [
+            {
+                "campaign_id": "campaign123",
+                "oauth_token": "token_for_campaign123",
+                "client_id": "client123"
+            },
+            {
+                "campaign_id": "campaign456",
+                "oauth_token": "token_for_campaign456",
+                "client_id": "client456"
+            }
+        ]
+    }
+}
